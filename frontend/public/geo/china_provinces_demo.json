@@ -1,0 +1,53 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": { "name": "福建", "code": "FJ" },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[118.0, 23.5], [120.5, 23.5], [120.5, 28.0], [118.0, 28.0], [118.0, 23.5]]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": { "name": "广东", "code": "GD" },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[109.5, 20.0], [117.0, 20.0], [117.0, 25.5], [109.5, 25.5], [109.5, 20.0]]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": { "name": "浙江", "code": "ZJ" },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[118.0, 27.0], [123.0, 27.0], [123.0, 31.5], [118.0, 31.5], [118.0, 28.0], [118.0, 27.0]]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": { "name": "江苏", "code": "JS" },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[116.5, 30.5], [122.0, 30.5], [122.0, 35.0], [116.5, 35.0], [116.5, 30.5]]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": { "name": "上海", "code": "SH" },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[121.0, 30.7], [122.0, 30.7], [122.0, 31.5], [121.0, 31.5], [121.0, 30.7]]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": { "name": "台湾", "code": "TW" },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[120.0, 21.8], [122.0, 21.8], [122.0, 25.5], [120.0, 25.5], [120.0, 21.8]]]
+      }
+    }
+  ]
+}
