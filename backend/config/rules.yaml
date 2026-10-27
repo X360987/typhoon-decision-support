@@ -1,0 +1,76 @@
+version: "rules-v2"
+
+provinces:
+  - code: FJ
+    name: 福建
+  - code: GD
+    name: 广东
+  - code: ZJ
+    name: 浙江
+  - code: JS
+    name: 江苏
+  - code: SH
+    name: 上海
+  - code: TW
+    name: 台湾
+
+single:
+  window_hours: 12
+  min_samples: 6
+  mad_z_threshold: 3.0
+  quantile_threshold: 0.95
+  consecutive_hours: 2
+  social:
+    negative_ratio_abs_floor: 0.35
+    discussion_spike_factor: 2.5
+  org:
+    publish_drop_factor: 0.35
+    publish_spike_factor: 2.5
+    gap_hours: 6
+  physical:
+    suspension_spike_factor: 2.0
+    affected_trains_abs_floor: 8
+
+pair:
+  lag_hours: 3
+  min_coverage: 0.5
+  relation_z_threshold: 2.5
+  social_org:
+    discussion_vs_official_imbalance: 2.0
+  social_physical:
+    emotion_vs_suspension_imbalance: 2.0
+  org_physical:
+    official_vs_suspension_lag_hours: 4
+
+joint:
+  # 三维同步要求三个维度都有观测且都有信号；只有两维信号时输出 triple_imbalance（关系失衡），不称三维同步
+  min_dimensions_with_signal: 3
+  lag_hours: 3
+  score_threshold: 3.0
+  imbalance_enabled: true
+
+accounts:
+  # 不在核验清单、认证类型也无法判定的账号：unknown（不计入个人或官方）| personal
+  unverified_default: unknown
+
+replay:
+  # as_known 模式只展示 available_at <= as_of 的结果；到达时间缺失或早于发布时间的记录不能严格回放
+  strict_requires_available_at: true
+
+suggestions:
+  - id: verify_capacity
+    trigger_scopes: [single, pair, joint]
+    dimensions: [physical]
+    text: 建议人工核实运力公告与停运范围，确认是否为预防性措施。
+  - id: info_needs
+    trigger_scopes: [single, pair]
+    dimensions: [social]
+    text: 建议关注公众信息需求与求助主题，核查是否需要补充说明。
+  - id: publish_match
+    trigger_scopes: [pair, joint]
+    dimensions: [social, organizational]
+    text: 建议核对官方发布与公众讨论主题是否匹配，不据此推断失职。
+  - id: forecast_risk
+    trigger_scopes: [single]
+    nature: prediction
+    text: 预测风险提示：未来窗口可能升高，请人工复核后使用，不表述为已发生事实。

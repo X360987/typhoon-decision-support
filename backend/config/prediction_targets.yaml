@@ -1,0 +1,45 @@
+version: "targets-v1"
+horizons_hours: [1, 3, 6, 12, 24]
+
+targets:
+  - id: affected_trains
+    name: 受影响车次数
+    unit: 列/小时
+    dimension: physical
+    aggregation: hourly_count
+    min_label_coverage: 0.3
+    clip_min: 0
+  - id: personal_weibo_count
+    name: 个人微博量
+    unit: 条/小时
+    dimension: social
+    aggregation: hourly_count
+    # sparse alternative: future_window_sum with window_hours 6
+    min_label_coverage: 0.2
+    clip_min: 0
+  - id: negative_ratio
+    name: 负面情绪比例
+    unit: 比例
+    dimension: social
+    aggregation: hourly_ratio
+    min_label_coverage: 0.3
+    clip_min: 0
+    clip_max: 1
+  - id: official_weibo_count
+    name: 官方发文量
+    unit: 条/小时
+    dimension: organizational
+    aggregation: hourly_count
+    # may be switched to future_6h_sum without silent rename
+    min_label_coverage: 0.2
+    clip_min: 0
+
+training_gate:
+  min_events: 1
+  min_province_hours: 50
+  min_labels_per_target: 30
+  require_forecast_snapshots_for_strict_backtest: true
+
+cold_start:
+  strategy: naive_baseline
+  note: 新事件无足够历史特征时使用朴素基线，适用范围为演示基线。

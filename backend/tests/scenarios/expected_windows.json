@@ -1,0 +1,14 @@
+{
+  "note": "Expected trigger windows for human/scenario checklist only. Detectors must NOT read this file.",
+  "event_code": "SIM-DOKSURI-2023",
+  "windows": [
+    { "scene": "social_only_negative", "province": "FJ", "hour_offset_range": [20, 26] },
+    { "scene": "org_only_gap", "province": "GD", "hour_offset_range": [30, 34] },
+    { "scene": "physical_only_suspension", "province": "ZJ", "hour_offset_range": [40, 46] },
+    { "scene": "pair_social_org", "province": "JS", "hour_offset_range": [50, 54] },
+    { "scene": "pair_org_physical", "province": "SH", "hour_offset_range": [55, 58] },
+    { "scene": "joint_triple", "province": "FJ", "hour_offset_range": [60, 64] },
+    { "scene": "pre_disaster_forecast_talk", "province": "TW", "hour_offset_range": [10, 14] },
+    { "scene": "low_sample", "province": "GD", "hour_offset_range": [18, 18] }
+  ]
+}

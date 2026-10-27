@@ -1,0 +1,3 @@
+source_id,bid,user_id,nickname,content,publish_location,topics,reposts,comments,likes,published_at,available_at,ip,verify_type
+REAL-WB-001,BID001,U1001,示例用户,福建关注台风动态,福建,#台风#,1,2,3,2023-07-26 10:15:00,2023-07-26 10:20:00,1.1.1.10,
+REAL-WB-002,BID002,U2001,示例政务,广东发布出行提示,广东,#预警#,2,1,5,2023-07-26 11:00:00,2023-07-26 11:03:00,2.2.2.10,机构认证
