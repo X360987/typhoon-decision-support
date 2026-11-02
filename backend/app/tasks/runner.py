@@ -1,3 +1,5 @@
+"""场景：复用。进程内任务记录。"""
+
 from __future__ import annotations
 
 from datetime import datetime

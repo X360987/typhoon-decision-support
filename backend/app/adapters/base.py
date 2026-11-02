@@ -1,3 +1,5 @@
+"""场景：复用。数据源适配器接口。"""
+
 from __future__ import annotations
 
 from abc import ABC, abstractmethod

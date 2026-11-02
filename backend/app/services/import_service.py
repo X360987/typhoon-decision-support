@@ -1,3 +1,5 @@
+"""场景：灾前。微博预检、凭证与批次。"""
+
 from __future__ import annotations
 
 import base64
@@ -25,11 +27,11 @@ ERROR_POLICIES = ("strict", "skip_errors")
 # Entities that have an import path today; the rest are listed so the UI can show them as not connected.
 IMPORT_SOURCES = [
     {"entity": "weibo", "name": "微博（个人与官方）", "status": "supported", "template": "weibo_template.csv"},
-    {"entity": "accounts", "name": "账号核验清单", "status": "not_connected"},
-    {"entity": "suspensions", "name": "停运公告", "status": "not_connected"},
-    {"entity": "timetable", "name": "列车时刻表", "status": "not_connected"},
-    {"entity": "hazard", "name": "台风实况", "status": "not_connected"},
-    {"entity": "forecast", "name": "预报快照", "status": "not_connected"},
+    {"entity": "accounts", "name": "账号核验清单", "status": "supported"},
+    {"entity": "suspensions", "name": "停运公告", "status": "supported"},
+    {"entity": "timetable", "name": "列车时刻表", "status": "supported"},
+    {"entity": "hazard", "name": "台风实况", "status": "supported"},
+    {"entity": "forecast", "name": "预报快照", "status": "supported"},
 ]
 
 _process_secret = secrets.token_hex(32)
@@ -110,10 +112,14 @@ def validate_frame(df: pd.DataFrame, entity: str) -> dict[str, Any]:
         "preview": [],
     }
     if entity != "weibo":
-        report["ok"] = False
-        report["error"] = "entity_not_connected"
-        report["message"] = f"{entity} 导入未接入"
-        return report
+        from app.pre.sources import SPECS, validate_table
+
+        if entity not in SPECS:
+            report["ok"] = False
+            report["error"] = "entity_not_connected"
+            report["message"] = f"{entity} 导入未接入"
+            return report
+        return validate_table(df, entity)
     missing_cols = [c for c in WEIBO_REQUIRED if c not in df.columns]
     report["checks"].append(
         {"name": "必填字段", "status": "fail" if missing_cols else "pass", "detail": f"缺少 {missing_cols}" if missing_cols else "齐全"}
@@ -212,6 +218,12 @@ def validate_frame(df: pd.DataFrame, entity: str) -> dict[str, Any]:
         },
         {"name": "重复记录", "status": "warn" if dup else "pass", "detail": f"{dup} 行重复" if dup else "无重复"},
     ]
+    rows_n = len(df) or 1
+    report["completeness"] = 1 - (report["blocking_errors"] / rows_n)
+    report["time_anomaly_rate"] = bad_time / rows_n
+    located = sum(count for name, count in report["province_coverage"].items() if name != "UNKNOWN")
+    located_total = sum(report["province_coverage"].values())
+    report["geo_coverage"] = (located / located_total) if located_total else None
     if report["blocking_errors"]:
         report["ok"] = False
         report["error"] = "row_errors"
@@ -299,15 +311,32 @@ def commit_weibo_import(
     error_policy: str = "strict",
     confirm_skip: bool = False,
     file_name: str | None = None,
+    entity: str = "weibo",
 ) -> dict[str, Any]:
     if error_policy not in ERROR_POLICIES:
         raise ImportRejected("bad_policy", f"error_policy 仅支持 {ERROR_POLICIES}")
     digest = file_hash(data)
     verify_token(
         token,
-        {"file_hash": digest, "entity": "weibo", "dataset_id": dataset_id, "event_id": event_id, "mapping": column_mapping or {}},
+        {"file_hash": digest, "entity": entity, "dataset_id": dataset_id, "event_id": event_id, "mapping": column_mapping or {}},
     )
     df = read_frame(path, column_mapping)
+    if entity != "weibo":
+        from app.pre.sources import commit_table_import
+
+        return commit_table_import(
+            db,
+            dataset_id,
+            event_id,
+            df,
+            data,
+            token,
+            entity=entity,
+            column_mapping=column_mapping,
+            error_policy=error_policy,
+            confirm_skip=confirm_skip,
+            file_name=file_name,
+        )
     report = validate_frame(df, "weibo")
     if report.get("error") == "missing_columns":
         raise ImportRejected("missing_columns", report["message"])

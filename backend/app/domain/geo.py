@@ -1,4 +1,4 @@
-"""Province attribution helpers."""
+"""场景：复用。省份归属。"""
 
 from __future__ import annotations
 

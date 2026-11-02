@@ -1,3 +1,5 @@
+"""场景：复用。演示数据准备，串联灾前灌数、版本化流水线与预测实验。"""
+
 from __future__ import annotations
 
 from typing import Any

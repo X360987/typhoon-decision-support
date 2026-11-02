@@ -1,4 +1,4 @@
-"""Map suspensions to province-hour using timetable stops.
+"""场景：灾中。用时刻表站序把停运映射到省小时。
 
 The full run of a train instance is placed on an absolute timeline first (origin
 departure date + cumulative midnight crossings), and only then clipped to the

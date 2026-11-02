@@ -1,3 +1,5 @@
+"""场景：复用。单指标预测实验。灾前实验与灾中走向共用，区间未校准时保持为空。"""
+
 from __future__ import annotations
 
 from datetime import datetime, timedelta

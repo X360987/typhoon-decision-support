@@ -1,3 +1,5 @@
+"""场景：复用。全部数据表；新表仍加在本文件，并用注释标出所属场景。"""
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -39,14 +41,87 @@ class Event(Base):
     event_code: Mapped[str] = mapped_column(String(64))
     name: Mapped[str] = mapped_column(String(128))
     external_typhoon_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    english_name: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    aliases: Mapped[Optional[list[Any]]] = mapped_column(JSON, nullable=True)
     start_time: Mapped[datetime] = mapped_column(DateTime)
-    end_time: Mapped[datetime] = mapped_column(DateTime)
+    end_time: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     status: Mapped[str] = mapped_column(String(32), default="historical")  # tracking|historical
+    warning_level: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    forecast_provinces: Mapped[Optional[list[Any]]] = mapped_column(JSON, nullable=True)
+    source_mode: Mapped[str] = mapped_column(String(16), default="manual")  # manual|auto
     config_version: Mapped[str] = mapped_column(String(64), default="v1")
     source_refs: Mapped[Optional[dict[str, Any]]] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     __table_args__ = (UniqueConstraint("dataset_id", "event_code", name="uq_event_dataset_code"),)
+
+
+class SourceSnapshot(Base):
+    """场景：灾前。中央气象台或手工来源的原始快照。"""
+
+    __tablename__ = "source_snapshot"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    dataset_id: Mapped[str] = mapped_column(String(64), index=True)
+    event_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("event.id"), nullable=True)
+    source_type: Mapped[str] = mapped_column(String(32))
+    url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    published_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    fetched_at: Mapped[datetime] = mapped_column(DateTime)
+    content_hash: Mapped[str] = mapped_column(String(64))
+    body: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+
+class WarningRecord(Base):
+    """场景：灾前。预警记录，以预警编号幂等追加。"""
+
+    __tablename__ = "warning_record"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    dataset_id: Mapped[str] = mapped_column(String(64), index=True)
+    event_id: Mapped[int] = mapped_column(Integer, ForeignKey("event.id"), index=True)
+    warning_id: Mapped[str] = mapped_column(String(64))
+    level: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    title: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
+    issued_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    arrived_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    areas: Mapped[Optional[list[Any]]] = mapped_column(JSON, nullable=True)
+    status: Mapped[str] = mapped_column(String(32), default="active")
+
+    __table_args__ = (UniqueConstraint("dataset_id", "warning_id", name="uq_warning_dataset"),)
+
+
+class KeywordSet(Base):
+    """场景：灾前。带版本的检索词。"""
+
+    __tablename__ = "keyword_set"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    dataset_id: Mapped[str] = mapped_column(String(64), index=True)
+    event_id: Mapped[int] = mapped_column(Integer, ForeignKey("event.id"), index=True)
+    version: Mapped[int] = mapped_column(Integer)
+    keywords: Mapped[list[Any]] = mapped_column(JSON)
+    negative_keywords: Mapped[list[Any]] = mapped_column(JSON)
+    coverage: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+    __table_args__ = (UniqueConstraint("dataset_id", "event_id", "version", name="uq_keyword_version"),)
+
+
+class CollectionTask(Base):
+    """场景：灾前。按关键词集登记的采集任务。微博正文仍由文件导入进入。"""
+
+    __tablename__ = "collection_task"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    dataset_id: Mapped[str] = mapped_column(String(64), index=True)
+    event_id: Mapped[int] = mapped_column(Integer, ForeignKey("event.id"), index=True)
+    keyword_version: Mapped[int] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(String(32), default="planned")
+    window_start: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    window_end: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    query_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
 
 class Account(Base):

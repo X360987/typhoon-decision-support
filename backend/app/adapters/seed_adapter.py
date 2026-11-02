@@ -1,4 +1,4 @@
-"""Deterministic demo seed. Clear SIM- prefixes; never pretends to be real Weibo."""
+"""场景：灾前。可复现的演示数据。记录带 SIM- 前缀，不冒充真实微博。"""
 
 from __future__ import annotations
 

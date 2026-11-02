@@ -1,4 +1,4 @@
-"""Rolling baseline helpers. Never use future values."""
+"""场景：复用。滚动基线。不使用未来值。"""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""Shared query context so every list, card, chart, detail and export applies the same filters."""
+"""场景：复用。共享查询上下文，列表、卡片、详情和导出使用同一组过滤。"""
 
 from __future__ import annotations
 

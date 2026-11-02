@@ -1,3 +1,5 @@
+"""场景：复用。数据库引擎与会话。"""
+
 from collections.abc import Generator
 from datetime import date, datetime
 from json import dumps

@@ -1,3 +1,5 @@
+"""场景：复用。数据模式、写权限与操作者。"""
+
 from __future__ import annotations
 
 import hmac

@@ -1,4 +1,4 @@
-"""Single / pair / joint anomaly detectors. Do not read scenario labels.
+"""场景：灾中。单维、关系与联合异常判定。不读取事后阶段标签。
 
 Each detector only runs where the dimensions it needs have observations for the
 province and window. A missing dimension yields an ``insufficient`` task status,
@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Any, Iterable
 
-from app.domain.stats import quantile, rolling_mean, robust_z, safe_ratio
+from app.domain.stats import median, quantile, robust_z, safe_ratio
 
 DIMENSIONS = ("social", "organizational", "physical")
 PAIR_TASKS = {
@@ -87,6 +87,22 @@ def _index(points: list[MetricPoint], metric: str) -> dict[tuple[str, datetime],
     return {(p.province_code, p.hour_bj): p for p in points if p.metric_id == metric}
 
 
+def _keep_consecutive(cands: list[AnomalyCandidate], hours: int) -> list[AnomalyCandidate]:
+    """Keep a hit only when the same signal is present for ``hours`` ending at that hour."""
+    need = max(1, int(hours))
+    if need <= 1:
+        return cands
+    present: dict[tuple[str, str], set[datetime]] = {}
+    for cand in cands:
+        present.setdefault((cand.anomaly_type, cand.province_code), set()).add(cand.hour_bj)
+    kept: list[AnomalyCandidate] = []
+    for cand in cands:
+        seen = present[(cand.anomaly_type, cand.province_code)]
+        if all((cand.hour_bj - timedelta(hours=i)) in seen for i in range(need)):
+            kept.append(cand)
+    return kept
+
+
 def detect_single_social(
     points: list[MetricPoint],
     rules: dict[str, Any],
@@ -129,7 +145,7 @@ def detect_single_social(
                         p.province_code,
                         p.hour_bj,
                         score=score,
-                        baseline=rolling_mean(hist),  # type: ignore[arg-type]
+                        baseline=median(hist),  # type: ignore[arg-type]
                         threshold=thr if thr is not None else floor,
                         explanation="社会维：负面情绪比例相对适用基线显著升高。",
                         evidences=[
@@ -158,7 +174,7 @@ def detect_single_social(
                 continue
             win = _window(disc_series, p.hour_bj, window)
             hist = [x.value for x in win]
-            base = rolling_mean(hist)  # type: ignore[arg-type]
+            base = median(hist)
             if base is None or base <= 0 or len(hist) < min_samples:
                 continue
             if p.value >= base * factor:
@@ -185,7 +201,7 @@ def detect_single_social(
                         task="single_social",
                     )
                 )
-    return out
+    return _keep_consecutive(out, int(cfg.get("consecutive_hours", 2)))
 
 
 def detect_single_org(points: list[MetricPoint], rules: dict[str, Any]) -> list[AnomalyCandidate]:
@@ -205,7 +221,7 @@ def detect_single_org(points: list[MetricPoint], rules: dict[str, Any]) -> list[
                 continue
             win = _window(series, p.hour_bj, window)
             hist = [x.value for x in win]
-            base = rolling_mean(hist)  # type: ignore[arg-type]
+            base = median(hist)
             if base is None or len(hist) < min_samples:
                 continue
             if p.value >= max(1.0, base * spike):
@@ -265,7 +281,10 @@ def detect_single_org(points: list[MetricPoint], rules: dict[str, Any]) -> list[
                             task="single_org",
                         )
                     )
-    return out
+    # A gap already requires a multi-hour low streak, so the two-hour rule applies only to spikes.
+    spikes = [cand for cand in out if cand.anomaly_type != "official_publish_gap"]
+    gaps = [cand for cand in out if cand.anomaly_type == "official_publish_gap"]
+    return gaps + _keep_consecutive(spikes, int(cfg.get("consecutive_hours", 2)))
 
 
 def detect_single_physical(points: list[MetricPoint], rules: dict[str, Any]) -> list[AnomalyCandidate]:
@@ -282,7 +301,7 @@ def detect_single_physical(points: list[MetricPoint], rules: dict[str, Any]) -> 
                 continue
             win = _window(series, p.hour_bj, window)
             hist = [x.value for x in win]
-            base = rolling_mean(hist)  # type: ignore[arg-type]
+            base = median(hist)
             triggered = False
             thr = None
             score = None
@@ -318,7 +337,7 @@ def detect_single_physical(points: list[MetricPoint], rules: dict[str, Any]) -> 
                         task="single_physical",
                     )
                 )
-    return out
+    return _keep_consecutive(out, int(cfg.get("consecutive_hours", 2)))
 
 
 def detect_social_org(social: list[MetricPoint], org: list[MetricPoint], rules: dict[str, Any]) -> list[AnomalyCandidate]:
@@ -534,23 +553,27 @@ def detect_joint(
             label = {"social": "社会", "organizational": "组织", "physical": "物理"}
             out.append(
                 AnomalyCandidate(
-                    "joint",
-                    list(DIMENSIONS),
+                    "pair",
+                    active,
                     "triple_imbalance",
                     prov,
                     hour,
                     score=2.0,
                     threshold=thr,
                     explanation=(
-                        f"三维关系失衡：{'、'.join(label[a] for a in active)}偏高而{label[quiet]}未同步，"
-                        "三维均有观测；不是三维同步。"
+                        f"关系失衡：{'、'.join(label[a] for a in active)}偏高而{label[quiet]}未同步，"
+                        "不是三维联合异常。"
                     ),
                     evidences=[
                         {"evidence_type": "joint", "summary": summary, "payload": {"active": active, "quiet": quiet}}
                     ],
-                    group_key=f"joint:imb:{prov}:{hour.isoformat()}",
+                    group_key=f"pair:imb:{prov}:{hour.isoformat()}",
                     available_at=_avail(inputs),
-                    task="joint",
+                    task={
+                        frozenset(("social", "organizational")): "pair_social_org",
+                        frozenset(("social", "physical")): "pair_social_physical",
+                        frozenset(("organizational", "physical")): "pair_org_physical",
+                    }.get(frozenset(active), "pair_social_org"),
                 )
             )
     return out

@@ -1,3 +1,5 @@
+"""场景：复用。规则与预测目标配置。"""
+
 from __future__ import annotations
 
 from functools import lru_cache

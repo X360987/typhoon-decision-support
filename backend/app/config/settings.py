@@ -1,3 +1,5 @@
+"""场景：复用。进程配置。"""
+
 from functools import lru_cache
 from pathlib import Path
 
@@ -29,6 +31,7 @@ class Settings(BaseSettings):
     default_dataset_id: str = "demo"
     rules_config_path: str = str(BACKEND_ROOT / "config" / "rules.yaml")
     prediction_targets_path: str = str(BACKEND_ROOT / "config" / "prediction_targets.yaml")
+    keyword_lexicon_path: str = str(BACKEND_ROOT / "config" / "keyword_lexicon.yaml")
     demo_open: bool = True
     max_upload_mb: int = 20
     max_page_size: int = 200

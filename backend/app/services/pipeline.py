@@ -1,4 +1,4 @@
-"""Clean -> map -> aggregate -> detect, per event, as one versioned analysis run.
+"""场景：复用。按事件把清洗、映射、聚合和异常检测放进同一次版本化分析。
 
 All stages of a run share one transaction. Outputs (metrics, anomalies, evidence,
 suggestions) are tagged with a new ``data_version``; the event's active-version
@@ -98,6 +98,7 @@ def classify_account(raw: WeiboRaw, acc: Account | None, unverified_default: str
 
 
 def clean_weibo(db: Session, dataset_id: str, event_id: int) -> dict[str, Any]:
+    """场景：灾前。账号分类、情绪、地域与时间归一。"""
     rules = load_rules()
     unverified_default = rules.get("accounts", {}).get("unverified_default", "unknown")
     sentiment = get_sentiment_model()
@@ -173,6 +174,7 @@ def clean_weibo(db: Session, dataset_id: str, event_id: int) -> dict[str, Any]:
 
 
 def map_suspensions(db: Session, dataset_id: str, event_id: int) -> dict[str, Any]:
+    """场景：灾中。停运公告映射到省小时，未知端点待核验。"""
     ds = db.get(Dataset, dataset_id)
     is_demo = bool(ds and ds.data_mode == "demo")
     stops = [
@@ -257,6 +259,7 @@ def map_suspensions(db: Session, dataset_id: str, event_id: int) -> dict[str, An
 
 
 def aggregate_metrics(db: Session, dataset_id: str, event_id: int, version: str) -> dict[str, Any]:
+    """场景：灾前。省小时聚合，全国口径单独去重，缺测保留为空。"""
     now = datetime.utcnow()
     ev = db.get(Event, event_id)
     org_covered = {
@@ -419,7 +422,7 @@ def aggregate_metrics(db: Session, dataset_id: str, event_id: int, version: str)
 
 
 def _raw_evidence(db: Session, dataset_id: str, event_id: int, cand, limit: int = 3) -> list[dict[str, Any]]:
-    """Link candidates to raw posts / suspension notices in the same province-hour."""
+    """场景：灾中。为候选异常选取同一省小时的原始微博或停运公告，并脱敏。"""
     out: list[dict[str, Any]] = []
     hour = cand.hour_bj
     dims = set(cand.dimensions)
@@ -481,6 +484,7 @@ def _raw_evidence(db: Session, dataset_id: str, event_id: int, cand, limit: int 
 
 
 def run_anomaly_detection(db: Session, dataset_id: str, event_id: int, version: str) -> dict[str, Any]:
+    """场景：灾中。单维、关系与联合异常，并写入证据和建议。"""
     rules = load_rules()
     rule_version = rules.get("version", "rules-v1")
     now = datetime.utcnow()

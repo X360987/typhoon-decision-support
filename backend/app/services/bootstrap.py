@@ -1,3 +1,5 @@
+"""场景：复用。数据集与指标口径初始化。"""
+
 from __future__ import annotations
 
 from sqlalchemy.orm import Session
