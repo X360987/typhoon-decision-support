@@ -1,4 +1,4 @@
-"""Pluggable sentiment interface. Default is an explicitly labeled demo rule classifier."""
+"""场景：复用。可替换的情绪识别。默认实现是标明为演示的规则分类器。"""
 
 from __future__ import annotations
 

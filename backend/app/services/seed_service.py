@@ -1,3 +1,5 @@
+"""场景：灾前。演示数据写入。"""
+
 from __future__ import annotations
 
 from datetime import datetime

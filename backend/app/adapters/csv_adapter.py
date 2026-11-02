@@ -1,3 +1,5 @@
+"""场景：灾前。CSV/XLSX 文件读取。"""
+
 from __future__ import annotations
 
 from pathlib import Path

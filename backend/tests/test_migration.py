@@ -56,7 +56,8 @@ def test_revision_002_keeps_existing_rows(tmp_path):
         assert c.exec_driver_sql("SELECT anomaly_type, data_version FROM anomaly").all() == [("negative_ratio_spike", "v1")]
         assert c.exec_driver_sql("SELECT note FROM review_record").scalar() == "旧核验"
         assert c.exec_driver_sql("SELECT dataset_id, event_id, data_version FROM active_version").all() == [("legacy", 7, "v1")]
-        assert c.exec_driver_sql("SELECT version_num FROM alembic_version").scalar() == "002"
+        assert c.exec_driver_sql("SELECT version_num FROM alembic_version").scalar() == "003"
+        assert "keyword_set" in insp.get_table_names()
     eng.dispose()
 
     command.downgrade(cfg, "001")

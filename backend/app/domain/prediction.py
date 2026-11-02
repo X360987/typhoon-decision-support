@@ -1,4 +1,4 @@
-"""Prediction features, baselines, and leakage-safe labeling."""
+"""场景：复用。预测特征、基线与避免泄漏的标签构造。灾前实验与灾中走向共用。"""
 
 from __future__ import annotations
 

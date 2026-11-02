@@ -1,3 +1,5 @@
+"""场景：灾后。按当前查询上下文导出指标与异常 CSV。"""
+
 from __future__ import annotations
 
 import csv

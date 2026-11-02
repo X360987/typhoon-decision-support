@@ -1,3 +1,5 @@
+"""场景：复用。指标口径注册。"""
+
 from __future__ import annotations
 
 DEFAULT_METRICS = [
