@@ -1,695 +1,179 @@
-"""场景：复用。全部数据表；新表仍加在本文件，并用注释标出所属场景。"""
+"""核心关系模型。平台 ID 使用字符串，历史身份不随账号资料更新。"""
 
-from __future__ import annotations
-
-from datetime import datetime
-from typing import Any, Optional
+from datetime import date, datetime
+from typing import Any
 
 from sqlalchemy import (
     JSON,
     Boolean,
+    CheckConstraint,
+    Date,
     DateTime,
     Float,
     ForeignKey,
-    Index,
+    ForeignKeyConstraint,
     Integer,
     String,
     Text,
     UniqueConstraint,
     func,
 )
-from sqlalchemy.orm import Mapped, mapped_column, relationship
-
-from app.db import Base
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
-class Dataset(Base):
-    __tablename__ = "dataset"
-
-    id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    name: Mapped[str] = mapped_column(String(128))
-    data_mode: Mapped[str] = mapped_column(String(16))  # demo | real
-    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+class Base(DeclarativeBase):
+    """所有业务表的声明式基类。"""
 
 
-class Event(Base):
-    __tablename__ = "event"
+class Typhoon(Base):
+    """经核对的官方台风目录；不向普通 HTTP 客户端开放新增接口。"""
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    dataset_id: Mapped[str] = mapped_column(String(64), ForeignKey("dataset.id"), index=True)
-    event_code: Mapped[str] = mapped_column(String(64))
-    name: Mapped[str] = mapped_column(String(128))
-    external_typhoon_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
-    english_name: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
-    aliases: Mapped[Optional[list[Any]]] = mapped_column(JSON, nullable=True)
-    start_time: Mapped[datetime] = mapped_column(DateTime)
-    end_time: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    status: Mapped[str] = mapped_column(String(32), default="historical")  # tracking|historical
-    warning_level: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
-    forecast_provinces: Mapped[Optional[list[Any]]] = mapped_column(JSON, nullable=True)
-    source_mode: Mapped[str] = mapped_column(String(16), default="manual")  # manual|auto
-    config_version: Mapped[str] = mapped_column(String(64), default="v1")
-    source_refs: Mapped[Optional[dict[str, Any]]] = mapped_column(JSON, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
-
-    __table_args__ = (UniqueConstraint("dataset_id", "event_code", name="uq_event_dataset_code"),)
+    __tablename__ = "typhoons"
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    name: Mapped[str] = mapped_column(String(100))
+    source_url: Mapped[str] = mapped_column(Text)
 
 
-class SourceSnapshot(Base):
-    """场景：灾前。中央气象台或手工来源的原始快照。"""
+class ImportBatch(Base):
+    """一次上传的原文件、预览与最终结果；提交操作可重复调用。"""
 
-    __tablename__ = "source_snapshot"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    dataset_id: Mapped[str] = mapped_column(String(64), index=True)
-    event_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("event.id"), nullable=True)
-    source_type: Mapped[str] = mapped_column(String(32))
-    url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    published_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    fetched_at: Mapped[datetime] = mapped_column(DateTime)
-    content_hash: Mapped[str] = mapped_column(String(64))
-    body: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-
-
-class WarningRecord(Base):
-    """场景：灾前。预警记录，以预警编号幂等追加。"""
-
-    __tablename__ = "warning_record"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    dataset_id: Mapped[str] = mapped_column(String(64), index=True)
-    event_id: Mapped[int] = mapped_column(Integer, ForeignKey("event.id"), index=True)
-    warning_id: Mapped[str] = mapped_column(String(64))
-    level: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
-    title: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
-    issued_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    arrived_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    areas: Mapped[Optional[list[Any]]] = mapped_column(JSON, nullable=True)
-    status: Mapped[str] = mapped_column(String(32), default="active")
-
-    __table_args__ = (UniqueConstraint("dataset_id", "warning_id", name="uq_warning_dataset"),)
-
-
-class KeywordSet(Base):
-    """场景：灾前。带版本的检索词。"""
-
-    __tablename__ = "keyword_set"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    dataset_id: Mapped[str] = mapped_column(String(64), index=True)
-    event_id: Mapped[int] = mapped_column(Integer, ForeignKey("event.id"), index=True)
-    version: Mapped[int] = mapped_column(Integer)
-    keywords: Mapped[list[Any]] = mapped_column(JSON)
-    negative_keywords: Mapped[list[Any]] = mapped_column(JSON)
-    coverage: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
-
-    __table_args__ = (UniqueConstraint("dataset_id", "event_id", "version", name="uq_keyword_version"),)
-
-
-class CollectionTask(Base):
-    """场景：灾前。按关键词集登记的采集任务。微博正文仍由文件导入进入。"""
-
-    __tablename__ = "collection_task"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    dataset_id: Mapped[str] = mapped_column(String(64), index=True)
-    event_id: Mapped[int] = mapped_column(Integer, ForeignKey("event.id"), index=True)
-    keyword_version: Mapped[int] = mapped_column(Integer)
-    status: Mapped[str] = mapped_column(String(32), default="planned")
-    window_start: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    window_end: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    query_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    __tablename__ = "import_batches"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    kind: Mapped[str] = mapped_column(String(20))
+    typhoon_id: Mapped[str | None] = mapped_column(ForeignKey("typhoons.id"))
+    catalog_year: Mapped[int | None] = mapped_column(Integer)
+    filename: Mapped[str] = mapped_column(Text)
+    file_path: Mapped[str] = mapped_column(Text)
+    sha256: Mapped[str] = mapped_column(String(64))
+    status: Mapped[str] = mapped_column(String(20), default="previewed")
+    rows: Mapped[list] = mapped_column(JSON)
+    report: Mapped[dict] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class Account(Base):
-    __tablename__ = "account"
+    """账号当前资料；政府映射未确定时 is_government 保持未知。"""
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    dataset_id: Mapped[str] = mapped_column(String(64), ForeignKey("dataset.id"), index=True)
-    user_id: Mapped[str] = mapped_column(String(64))
-    nickname: Mapped[str] = mapped_column(String(128))
-    account_class: Mapped[str] = mapped_column(String(32))  # personal | official
-    verified: Mapped[bool] = mapped_column(Boolean, default=False)
-    verify_type: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
-    checklist_source: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
-    home_province: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
-
-    __table_args__ = (UniqueConstraint("dataset_id", "user_id", name="uq_account_dataset_user"),)
+    __tablename__ = "accounts"
+    user_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    nickname: Mapped[str | None] = mapped_column(Text)
+    verified_type: Mapped[str | None] = mapped_column(String(64))
+    is_authoritative: Mapped[bool | None] = mapped_column(Boolean)
+    is_government: Mapped[bool | None] = mapped_column(Boolean)
+    profile: Mapped[dict] = mapped_column(JSON, default=dict)
 
 
-class DataBatch(Base):
-    __tablename__ = "data_batch"
+class Weibo(Base):
+    """微博正文及一次互动采集值；原始模板信息一并保留。"""
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    dataset_id: Mapped[str] = mapped_column(String(64), ForeignKey("dataset.id"), index=True)
-    event_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("event.id"), nullable=True)
-    source_type: Mapped[str] = mapped_column(String(32))  # seed|csv|xlsx|api
-    status: Mapped[str] = mapped_column(String(32), default="pending")
-    file_name: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
-    report: Mapped[Optional[dict[str, Any]]] = mapped_column(JSON, nullable=True)
-    idempotency_key: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
-    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-
-    __table_args__ = (
-        UniqueConstraint("dataset_id", "idempotency_key", name="uq_batch_idempotency"),
-        Index("ix_batch_status", "dataset_id", "status"),
-    )
-
-
-class ImportErrorRow(Base):
-    __tablename__ = "import_error"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    batch_id: Mapped[int] = mapped_column(Integer, ForeignKey("data_batch.id"), index=True)
-    row_number: Mapped[int] = mapped_column(Integer)
-    reason: Mapped[str] = mapped_column(Text)
-    raw_payload: Mapped[Optional[dict[str, Any]]] = mapped_column(JSON, nullable=True)
-
-
-class WeiboRaw(Base):
-    __tablename__ = "weibo_raw"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    dataset_id: Mapped[str] = mapped_column(String(64), index=True)
-    event_id: Mapped[int] = mapped_column(Integer, ForeignKey("event.id"), index=True)
-    batch_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("data_batch.id"), nullable=True)
-    source_id: Mapped[str] = mapped_column(String(64))
-    bid: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
-    user_id: Mapped[str] = mapped_column(String(64))
-    nickname: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
-    content: Mapped[str] = mapped_column(Text)
-    article_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    publish_location: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
-    at_users: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    topics: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    reposts: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    comments: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    likes: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    published_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    publish_tool: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
-    image_urls: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    video_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    retweet_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
-    ip: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
-    verify_level: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
-    verify_type: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
-    member_type: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
-    member_level: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
-    heat: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    stage: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
-    raw_payload: Mapped[Optional[dict[str, Any]]] = mapped_column(JSON, nullable=True)
-    available_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    ingested_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-
-    __table_args__ = (
-        UniqueConstraint("dataset_id", "source_id", name="uq_weibo_raw_source"),
-        Index("ix_weibo_raw_event_time", "dataset_id", "event_id", "published_at"),
-    )
-
-
-class WeiboClean(Base):
-    __tablename__ = "weibo_clean"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    dataset_id: Mapped[str] = mapped_column(String(64), index=True)
-    event_id: Mapped[int] = mapped_column(Integer, ForeignKey("event.id"), index=True)
-    weibo_raw_id: Mapped[int] = mapped_column(Integer, ForeignKey("weibo_raw.id"))
-    user_id: Mapped[str] = mapped_column(String(64))
-    account_class: Mapped[str] = mapped_column(String(32))
-    published_at: Mapped[datetime] = mapped_column(DateTime)
-    available_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    hour_bj: Mapped[datetime] = mapped_column(DateTime, index=True)
-    sentiment_label: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
-    sentiment_score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    sentiment_model_version: Mapped[str] = mapped_column(String(64), default="demo-rule-v1")
-    interaction: Mapped[int] = mapped_column(Integer, default=0)
-    is_help_request: Mapped[bool] = mapped_column(Boolean, default=False)
-    topics: Mapped[Optional[list[Any]]] = mapped_column(JSON, nullable=True)
-    publisher_home_province: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
-    quality_flags: Mapped[Optional[dict[str, Any]]] = mapped_column(JSON, nullable=True)
-
-
-class WeiboRegion(Base):
-    __tablename__ = "weibo_region"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    dataset_id: Mapped[str] = mapped_column(String(64), index=True)
-    event_id: Mapped[int] = mapped_column(Integer, ForeignKey("event.id"), index=True)
-    weibo_clean_id: Mapped[int] = mapped_column(Integer, ForeignKey("weibo_clean.id"))
-    province_code: Mapped[str] = mapped_column(String(16))
-    attribution_method: Mapped[str] = mapped_column(String(64))
-    is_unique_count: Mapped[bool] = mapped_column(Boolean, default=True)
-
-    __table_args__ = (
-        UniqueConstraint("weibo_clean_id", "province_code", name="uq_weibo_region"),
-        Index("ix_weibo_region_lookup", "dataset_id", "event_id", "province_code"),
-    )
-
-
-class TrainStop(Base):
-    __tablename__ = "train_stop"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    dataset_id: Mapped[str] = mapped_column(String(64), index=True)
-    record_no: Mapped[str] = mapped_column(String(64))
-    train_code: Mapped[str] = mapped_column(String(32))
-    timetable_version: Mapped[str] = mapped_column(String(64))
-    stop_order: Mapped[int] = mapped_column(Integer)
-    station_name: Mapped[str] = mapped_column(String(128))
-    city: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
-    province_code: Mapped[str] = mapped_column(String(16))
-    arrive_time: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
-    depart_time: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
-    passenger_service: Mapped[bool] = mapped_column(Boolean, default=True)
-    passenger_flag_note: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
-    valid_from: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    valid_to: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-
-    __table_args__ = (
-        UniqueConstraint(
-            "dataset_id", "train_code", "timetable_version", "stop_order", name="uq_train_stop"
-        ),
-    )
-
-
-class TrainSuspension(Base):
-    __tablename__ = "train_suspension"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    dataset_id: Mapped[str] = mapped_column(String(64), index=True)
-    event_id: Mapped[int] = mapped_column(Integer, ForeignKey("event.id"), index=True)
-    batch_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("data_batch.id"), nullable=True)
-    record_no: Mapped[str] = mapped_column(String(64))
-    suspension_date: Mapped[datetime] = mapped_column(DateTime)
-    train_code: Mapped[str] = mapped_column(String(32))
-    train_db_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
-    train_type: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
-    scope: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
-    segment_start: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
-    segment_end: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
-    scope_basis: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    notice_source_type: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
-    notice_account: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
-    notice_weibo_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
-    notice_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    confidence: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    evidence_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    match_method: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
-    merged_source_count: Mapped[int] = mapped_column(Integer, default=1)
-    known_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    raw_payload: Mapped[Optional[dict[str, Any]]] = mapped_column(JSON, nullable=True)
-
-    __table_args__ = (
-        UniqueConstraint("dataset_id", "record_no", name="uq_suspension_record"),
-        Index("ix_suspension_event", "dataset_id", "event_id", "suspension_date"),
-    )
-
-
-class SuspensionRegionHour(Base):
-    __tablename__ = "suspension_region_hour"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    dataset_id: Mapped[str] = mapped_column(String(64), index=True)
-    event_id: Mapped[int] = mapped_column(Integer, ForeignKey("event.id"), index=True)
-    suspension_id: Mapped[int] = mapped_column(Integer, ForeignKey("train_suspension.id"))
-    province_code: Mapped[str] = mapped_column(String(16))
-    hour_bj: Mapped[datetime] = mapped_column(DateTime)
-    train_code: Mapped[str] = mapped_column(String(32))
-    estimate_basis: Mapped[str] = mapped_column(String(128))
-    run_key: Mapped[Optional[str]] = mapped_column(String(96), nullable=True)
-    stations: Mapped[Optional[list[Any]]] = mapped_column(JSON, nullable=True)
-    available_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-
-    __table_args__ = (
-        UniqueConstraint(
-            "dataset_id",
-            "event_id",
-            "suspension_id",
-            "province_code",
-            "hour_bj",
-            "train_code",
-            name="uq_suspension_region_hour",
-        ),
-    )
-
-
-class HazardObservation(Base):
-    __tablename__ = "hazard_observation"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    dataset_id: Mapped[str] = mapped_column(String(64), index=True)
-    event_id: Mapped[int] = mapped_column(Integer, ForeignKey("event.id"), index=True)
-    observed_at: Mapped[datetime] = mapped_column(DateTime)
-    arrived_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    province_code: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
-    lat: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    lon: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    metric: Mapped[str] = mapped_column(String(64))
-    value: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    unit: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
-    source: Mapped[str] = mapped_column(String(64))
-    original_granularity: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
-    quality_flags: Mapped[Optional[dict[str, Any]]] = mapped_column(JSON, nullable=True)
-    raw_payload: Mapped[Optional[dict[str, Any]]] = mapped_column(JSON, nullable=True)
-
-
-class MetricRegistry(Base):
-    __tablename__ = "metric_registry"
-
+    __tablename__ = "weibo"
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    name: Mapped[str] = mapped_column(String(128))
-    dimension: Mapped[str] = mapped_column(String(32))  # social|organizational|physical|hazard
-    unit: Mapped[str] = mapped_column(String(32))
-    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    aggregation: Mapped[str] = mapped_column(String(64), default="sum")
-    version: Mapped[str] = mapped_column(String(32), default="v1")
-    active: Mapped[bool] = mapped_column(Boolean, default=True)
-
-
-class ProvinceHourMetric(Base):
-    __tablename__ = "province_hour_metric"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    dataset_id: Mapped[str] = mapped_column(String(64))
-    event_id: Mapped[int] = mapped_column(Integer, ForeignKey("event.id"))
-    province_code: Mapped[str] = mapped_column(String(16))
-    hour_bj: Mapped[datetime] = mapped_column(DateTime)
-    metric_id: Mapped[str] = mapped_column(String(64), ForeignKey("metric_registry.id"))
-    value: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    sample_size: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    coverage: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    quality_status: Mapped[str] = mapped_column(String(32), default="ok")
-    version: Mapped[str] = mapped_column(String(64), default="v1")
-    data_batch_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    available_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    computed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-
-    __table_args__ = (
-        UniqueConstraint(
-            "dataset_id",
-            "event_id",
-            "province_code",
-            "hour_bj",
-            "metric_id",
-            "version",
-            name="uq_province_hour_metric",
-        ),
-        Index("ix_phm_query", "dataset_id", "event_id", "province_code", "hour_bj"),
-    )
-
-
-class Anomaly(Base):
-    __tablename__ = "anomaly"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    dataset_id: Mapped[str] = mapped_column(String(64), index=True)
-    event_id: Mapped[int] = mapped_column(Integer, ForeignKey("event.id"), index=True)
-    analysis_scope: Mapped[str] = mapped_column(String(16))  # single|pair|joint
-    dimensions: Mapped[list[Any]] = mapped_column(JSON)
-    anomaly_type: Mapped[str] = mapped_column(String(64))
-    province_code: Mapped[str] = mapped_column(String(16))
-    hour_bj: Mapped[datetime] = mapped_column(DateTime)
-    nature: Mapped[str] = mapped_column(String(32), default="observation")  # observation|prediction
-    score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    baseline: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    threshold: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    quality_status: Mapped[str] = mapped_column(String(32), default="ok")
-    rule_version: Mapped[str] = mapped_column(String(64))
-    group_key: Mapped[str] = mapped_column(String(128), index=True)
-    explanation: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    hazard_context: Mapped[Optional[dict[str, Any]]] = mapped_column(JSON, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
-    data_version: Mapped[str] = mapped_column(String(64), default="v1", server_default="v1")
-    dims_key: Mapped[Optional[str]] = mapped_column(String(96), nullable=True)
-    available_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    decided_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    requires_future_window: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
-
-    evidences = relationship("AnomalyEvidence", back_populates="anomaly")
-    suggestions = relationship("Suggestion", back_populates="anomaly")
-
-    __table_args__ = (
-        Index("ix_anomaly_filter", "dataset_id", "event_id", "analysis_scope", "hour_bj"),
-    )
-
-
-class AnomalyEvidence(Base):
-    __tablename__ = "anomaly_evidence"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    anomaly_id: Mapped[int] = mapped_column(Integer, ForeignKey("anomaly.id"), index=True)
-    evidence_type: Mapped[str] = mapped_column(String(64))
-    ref_table: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
-    ref_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
-    summary: Mapped[str] = mapped_column(Text)
-    payload: Mapped[Optional[dict[str, Any]]] = mapped_column(JSON, nullable=True)
-
-    anomaly = relationship("Anomaly", back_populates="evidences")
-
-
-class Suggestion(Base):
-    __tablename__ = "suggestion"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    dataset_id: Mapped[str] = mapped_column(String(64), index=True)
-    event_id: Mapped[int] = mapped_column(Integer, ForeignKey("event.id"))
-    anomaly_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("anomaly.id"), nullable=True)
-    suggestion_code: Mapped[str] = mapped_column(String(64))
+    user_id: Mapped[str] = mapped_column(ForeignKey("accounts.user_id"), index=True)
     text: Mapped[str] = mapped_column(Text)
-    trigger_reason: Mapped[str] = mapped_column(Text)
-    review_status: Mapped[str] = mapped_column(String(32), default="pending")
-    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
-    data_version: Mapped[str] = mapped_column(String(64), default="v1", server_default="v1")
-
-    anomaly = relationship("Anomaly", back_populates="suggestions")
-
-
-class ReviewRecord(Base):
-    __tablename__ = "review_record"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    dataset_id: Mapped[str] = mapped_column(String(64))
-    target_type: Mapped[str] = mapped_column(String(32))
-    target_id: Mapped[int] = mapped_column(Integer)
-    action: Mapped[str] = mapped_column(String(32))
-    note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
-    operator: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
-
-
-class AnalysisRun(Base):
-    """One versioned recomputation of an event; outputs are tagged with data_version."""
-
-    __tablename__ = "analysis_run"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    dataset_id: Mapped[str] = mapped_column(String(64), index=True)
-    event_id: Mapped[int] = mapped_column(Integer, index=True)
-    data_version: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
-    status: Mapped[str] = mapped_column(String(32), default="running")
-    rule_version: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
-    trigger: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
-    message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    report: Mapped[Optional[dict[str, Any]]] = mapped_column(JSON, nullable=True)
-    started_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
-    finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-
-
-class ActiveVersion(Base):
-    """Pointer to the data_version currently served for an event."""
-
-    __tablename__ = "active_version"
-
-    dataset_id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    event_id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    data_version: Mapped[str] = mapped_column(String(64))
-    run_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
-
-
-class ActionTask(Base):
-    """Human-authorised business action derived from a reviewed suggestion; distinct from TaskRun."""
-
-    __tablename__ = "action_task"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    dataset_id: Mapped[str] = mapped_column(String(64), index=True)
-    event_id: Mapped[int] = mapped_column(Integer, index=True)
-    suggestion_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    title: Mapped[str] = mapped_column(Text)
-    owner: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
-    due_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    status: Mapped[str] = mapped_column(String(32), default="open")
-    receipt: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    review_note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    created_by: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
-    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
-
-
-class TaskRun(Base):
-    __tablename__ = "task_run"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    dataset_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
-    event_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    task_type: Mapped[str] = mapped_column(String(64))
-    status: Mapped[str] = mapped_column(String(32), default="pending")
-    progress: Mapped[float] = mapped_column(Float, default=0.0)
-    message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    idempotency_key: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
-    result: Mapped[Optional[dict[str, Any]]] = mapped_column(JSON, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime, server_default=func.now(), onupdate=func.now()
+    published_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    reposts: Mapped[int | None] = mapped_column(Integer)
+    comments: Mapped[int | None] = mapped_column(Integer)
+    likes: Mapped[int | None] = mapped_column(Integer)
+    heat: Mapped[int | None] = mapped_column(Integer)
+    ip_region: Mapped[str | None] = mapped_column(Text)
+    source_url: Mapped[str | None] = mapped_column(Text)
+    details: Mapped[dict] = mapped_column(JSON, default=dict)
+    __table_args__ = tuple(
+        CheckConstraint(f"{k} >= 0", name=f"ck_weibo_{k}")
+        for k in ("reposts", "comments", "likes", "heat")
     )
 
+
+class EventPost(Base):
+    """事件与微博的关系及该次采集身份快照，阶段属于事件语境。"""
+
+    __tablename__ = "event_posts"
+    typhoon_id: Mapped[str] = mapped_column(ForeignKey("typhoons.id"), primary_key=True)
+    weibo_id: Mapped[str] = mapped_column(ForeignKey("weibo.id"), primary_key=True)
+    stage: Mapped[str | None] = mapped_column(String(10))
+    verified_type: Mapped[str | None] = mapped_column(String(64))
+    is_authoritative: Mapped[bool | None] = mapped_column(Boolean)
+    is_government: Mapped[bool | None] = mapped_column(Boolean)
+    batch_id: Mapped[str] = mapped_column(ForeignKey("import_batches.id"))
+    __table_args__ = (CheckConstraint("stage IN ('灾前','灾中','灾后')", name="ck_stage"),)
+
+
+class Train(Base):
+    """年度车次目录；原始 ID 在不同年份不具有全局唯一性。"""
+
+    __tablename__ = "trains"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    year: Mapped[int] = mapped_column(Integer)
+    source_train_id: Mapped[str] = mapped_column(String(64))
+    train_no: Mapped[str] = mapped_column(String(32))
     __table_args__ = (
-        UniqueConstraint("task_type", "idempotency_key", name="uq_task_idempotency"),
+        UniqueConstraint("year", "source_train_id"),
+        UniqueConstraint("year", "train_no"),
+        UniqueConstraint("id", "year"),
     )
 
 
-class ForecastSnapshot(Base):
-    __tablename__ = "forecast_snapshot"
+class Station(Base):
+    """标准车站和可选 WGS84 坐标；无坐标时不制造地图点位。"""
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    dataset_id: Mapped[str] = mapped_column(String(64), index=True)
-    event_id: Mapped[int] = mapped_column(Integer, ForeignKey("event.id"), index=True)
-    source: Mapped[str] = mapped_column(String(64))
-    issued_at: Mapped[datetime] = mapped_column(DateTime)
-    arrived_at: Mapped[datetime] = mapped_column(DateTime)
-    revision: Mapped[int] = mapped_column(Integer, default=1)
-    raw_payload: Mapped[Optional[dict[str, Any]]] = mapped_column(JSON, nullable=True)
-
-    points = relationship("ForecastPoint", back_populates="snapshot")
-
-
-class ForecastPoint(Base):
-    __tablename__ = "forecast_point"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    snapshot_id: Mapped[int] = mapped_column(Integer, ForeignKey("forecast_snapshot.id"), index=True)
-    dataset_id: Mapped[str] = mapped_column(String(64), index=True)
-    event_id: Mapped[int] = mapped_column(Integer, ForeignKey("event.id"), index=True)
-    valid_time: Mapped[datetime] = mapped_column(DateTime)
-    lead_hours: Mapped[int] = mapped_column(Integer)
-    lat: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    lon: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    metric: Mapped[str] = mapped_column(String(64))
-    value: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    unit: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
-    version: Mapped[str] = mapped_column(String(64), default="v1")
-    province_code: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
-    path_distance_proxy: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-
-    snapshot = relationship("ForecastSnapshot", back_populates="points")
-
-
-class IngestionCursor(Base):
-    __tablename__ = "ingestion_cursor"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    dataset_id: Mapped[str] = mapped_column(String(64))
-    event_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    source: Mapped[str] = mapped_column(String(64))
-    cursor_value: Mapped[str] = mapped_column(String(128))
-    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
-
+    __tablename__ = "stations"
+    name: Mapped[str] = mapped_column(String(100), primary_key=True)
+    longitude: Mapped[float | None] = mapped_column(Float)
+    latitude: Mapped[float | None] = mapped_column(Float)
     __table_args__ = (
-        UniqueConstraint("dataset_id", "event_id", "source", name="uq_ingestion_cursor"),
+        CheckConstraint("longitude BETWEEN -180 AND 180"),
+        CheckConstraint("latitude BETWEEN -90 AND 90"),
     )
 
 
-class ModelRegistry(Base):
-    __tablename__ = "model_registry"
+class Suspension(Base):
+    """全程停运事实，业务唯一键不包含来源，禁止静默覆盖冲突。"""
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    model_key: Mapped[str] = mapped_column(String(128), unique=True)
-    target_id: Mapped[str] = mapped_column(String(64))
-    horizon_hours: Mapped[int] = mapped_column(Integer)
-    model_kind: Mapped[str] = mapped_column(String(32))  # baseline|tree|demo
-    data_mode: Mapped[str] = mapped_column(String(16))
-    feature_contract: Mapped[dict[str, Any]] = mapped_column(JSON)
-    train_window: Mapped[Optional[dict[str, Any]]] = mapped_column(JSON, nullable=True)
-    metrics: Mapped[Optional[dict[str, Any]]] = mapped_column(JSON, nullable=True)
-    artifact_path: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
-    version: Mapped[str] = mapped_column(String(64))
-    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
-
-
-class PredictionRun(Base):
-    __tablename__ = "prediction_run"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    dataset_id: Mapped[str] = mapped_column(String(64), index=True)
-    event_id: Mapped[int] = mapped_column(Integer, ForeignKey("event.id"), index=True)
-    origin_time: Mapped[datetime] = mapped_column(DateTime)
-    model_version: Mapped[str] = mapped_column(String(64))
-    status: Mapped[str] = mapped_column(String(32), default="completed")
-    quality_status: Mapped[str] = mapped_column(String(32), default="ok")
-    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
-
-
-class PredictionResult(Base):
-    __tablename__ = "prediction_result"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    run_id: Mapped[int] = mapped_column(Integer, ForeignKey("prediction_run.id"), index=True)
-    dataset_id: Mapped[str] = mapped_column(String(64))
-    event_id: Mapped[int] = mapped_column(Integer)
-    province_code: Mapped[str] = mapped_column(String(16))
-    target_id: Mapped[str] = mapped_column(String(64))
-    origin_time: Mapped[datetime] = mapped_column(DateTime)
-    valid_time: Mapped[datetime] = mapped_column(DateTime)
-    lead_hours: Mapped[int] = mapped_column(Integer)
-    point_pred: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    interval_low: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    interval_high: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    status: Mapped[str] = mapped_column(String(64))
-    reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    model_version: Mapped[str] = mapped_column(String(64))
-    train_cutoff: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    data_version: Mapped[str] = mapped_column(String(64), default="v1")
-    quality_status: Mapped[str] = mapped_column(String(32), default="ok")
-
+    __tablename__ = "suspensions"
+    record_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    typhoon_id: Mapped[str] = mapped_column(ForeignKey("typhoons.id"), index=True)
+    departure_date: Mapped[date] = mapped_column(Date, index=True)
+    catalog_year: Mapped[int] = mapped_column(Integer)
+    train_id: Mapped[int] = mapped_column(Integer)
+    raw_train_no: Mapped[str] = mapped_column(String(100))
+    origin: Mapped[str | None] = mapped_column(String(100))
+    destination: Mapped[str | None] = mapped_column(String(100))
+    scope: Mapped[str] = mapped_column(String(20), default="全程停运")
+    source_weibo_id: Mapped[str] = mapped_column(ForeignKey("weibo.id"))
+    batch_id: Mapped[str] = mapped_column(ForeignKey("import_batches.id"))
+    source_row: Mapped[int] = mapped_column(Integer)
+    evidence: Mapped[dict] = mapped_column(JSON, default=dict)
     __table_args__ = (
-        UniqueConstraint(
-            "dataset_id",
-            "event_id",
-            "province_code",
-            "target_id",
-            "origin_time",
-            "valid_time",
-            "model_version",
-            "run_id",
-            name="uq_prediction_result",
-        ),
-        Index("ix_pred_query", "dataset_id", "event_id", "origin_time", "target_id"),
+        UniqueConstraint("typhoon_id", "departure_date", "train_id"),
+        ForeignKeyConstraint(["train_id", "catalog_year"], ["trains.id", "trains.year"]),
+        CheckConstraint("scope = '全程停运'"),
+        CheckConstraint("EXTRACT(YEAR FROM departure_date) = catalog_year"),
     )
 
 
-class EvaluationResult(Base):
-    __tablename__ = "evaluation_result"
+class ManualSuspension(Base):
+    """人工长表的一行。保留复合车次的原写法和工作簿行号。"""
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    dataset_id: Mapped[str] = mapped_column(String(64))
-    event_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    target_id: Mapped[str] = mapped_column(String(64))
-    horizon_hours: Mapped[int] = mapped_column(Integer)
-    split_info: Mapped[dict[str, Any]] = mapped_column(JSON)
-    metrics: Mapped[dict[str, Any]] = mapped_column(JSON)
-    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    __tablename__ = "manual_suspensions"
+    record_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    typhoon_id: Mapped[str] = mapped_column(ForeignKey("typhoons.id"))
+    departure_date: Mapped[date] = mapped_column(Date)
+    raw_train_no: Mapped[str] = mapped_column(String(100))
+    batch_id: Mapped[str] = mapped_column(ForeignKey("import_batches.id"))
+    source_row: Mapped[int] = mapped_column(Integer)
+    __table_args__ = (UniqueConstraint("typhoon_id", "departure_date", "raw_train_no"),)
+    # 人工表没有站名和来源微博。查询经 app.geo.endpoints 读取，缺站名时地图计为未定位。
+    origin = destination = scope = source_weibo_id = None
 
 
-class DataReadinessReport(Base):
-    __tablename__ = "data_readiness_report"
+class Audit(Base):
+    """每次覆盖保留前后值和来源批次，支持科研追溯。"""
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    dataset_id: Mapped[str] = mapped_column(String(64), index=True)
-    report: Mapped[dict[str, Any]] = mapped_column(JSON)
-    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    __tablename__ = "audit_log"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    entity: Mapped[str] = mapped_column(String(30))
+    entity_id: Mapped[str] = mapped_column(String(100))
+    batch_id: Mapped[str] = mapped_column(ForeignKey("import_batches.id"))
+    before: Mapped[dict[str, Any]] = mapped_column(JSON)
+    after: Mapped[dict[str, Any]] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
