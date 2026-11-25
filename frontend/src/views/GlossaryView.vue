@@ -1,15 +1,24 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { api } from '../api/client'
+import SectionNav from '../components/SectionNav.vue'
 import StatusNote from '../components/StatusNote.vue'
 import { useLoader } from '../composables/useLoader'
 import { dimensionNames, fmtTime, provinceName } from '../lib/format'
 import { useContextStore } from '../stores/context'
 
 const ctx = useContextStore()
+const sections = [
+  { id: 'exp-title', label: '导出与复现' },
+  { id: 'metric-title', label: '指标口径' },
+  { id: 'rule-title', label: '异常判定阈值' },
+  { id: 'model-title', label: '预测模型' },
+  { id: 'bound-title', label: '证据边界' },
+]
 
 const registry = useLoader((signal) => api.registry(signal), () => ctx.revision)
 const models = useLoader((signal) => api.models(signal), () => ctx.revision)
+const sectionsPending = computed(() => registry.status.value === 'loading' || models.status.value === 'loading')
 
 const RULE_LABELS: Record<string, string> = {
   'single.window_hours': '单维基线窗口（小时）',
@@ -64,8 +73,10 @@ const metricCsv = computed(() => api.exportUrl('metrics', ctx.params))
       <span class="muted small">规则版本 {{ registry.data.value?.rule_version ?? '—' }} · 数据版本 {{ ctx.dataVersion || ctx.event?.active_version || '—' }} · 时区 北京时间（Asia/Shanghai）</span>
     </div>
 
-    <section class="section" aria-labelledby="exp-title">
-      <div class="section-head"><h2 id="exp-title">导出与复现</h2></div>
+    <SectionNav label="资料与口径目录" :sections="sections" :pending="sectionsPending" />
+
+    <section class="panel" aria-labelledby="exp-title">
+      <div class="section-head"><h2 id="exp-title" tabindex="-1">导出与复现</h2></div>
       <p class="small">
         导出的 CSV 每行都带数据集、事件、数据版本、规则版本、回放模式、截止时刻和时区，可据此复现页面结果。当前上下文：
         {{ ctx.event?.name || '未选择事件' }} · {{ ctx.province ? provinceName(ctx.province) : '全部省份' }} ·
@@ -78,8 +89,8 @@ const metricCsv = computed(() => api.exportUrl('metrics', ctx.params))
       <p v-else class="muted small">选择事件后可导出。</p>
     </section>
 
-    <section class="section" aria-labelledby="metric-title">
-      <div class="section-head"><h2 id="metric-title">指标口径</h2></div>
+    <section class="section panel" aria-labelledby="metric-title">
+      <div class="section-head"><h2 id="metric-title" tabindex="-1">指标口径</h2></div>
       <StatusNote :status="registry.status.value" :error="registry.error.value" @retry="registry.reload" />
       <div v-if="registry.data.value" class="table-wrap">
         <table class="data">
@@ -112,8 +123,8 @@ const metricCsv = computed(() => api.exportUrl('metrics', ctx.params))
       </div>
     </section>
 
-    <section class="section" aria-labelledby="rule-title">
-      <div class="section-head"><h2 id="rule-title">异常判定阈值</h2></div>
+    <section class="section panel" aria-labelledby="rule-title">
+      <div class="section-head"><h2 id="rule-title" tabindex="-1">异常判定阈值</h2></div>
       <div v-if="ruleRows.length" class="table-wrap narrow">
         <table class="data">
           <thead>
@@ -134,8 +145,8 @@ const metricCsv = computed(() => api.exportUrl('metrics', ctx.params))
       </div>
     </section>
 
-    <section class="section" aria-labelledby="model-title">
-      <div class="section-head"><h2 id="model-title">预测模型</h2></div>
+    <section class="section panel" aria-labelledby="model-title">
+      <div class="section-head"><h2 id="model-title" tabindex="-1">预测模型</h2></div>
       <StatusNote :status="models.status.value" :error="models.error.value" :empty="!models.data.value?.items.length" empty-text="尚未训练模型；预测页只显示基线方法。" @retry="models.reload" />
       <div v-if="models.data.value?.items.length" class="table-wrap">
         <table class="data">
@@ -180,8 +191,8 @@ const metricCsv = computed(() => api.exportUrl('metrics', ctx.params))
       <p class="small muted">模型只在单一事件的模拟数据上训练，未经跨事件验证；区间需要足够的历史残差，样本不足时不显示区间。</p>
     </section>
 
-    <section class="section" aria-labelledby="bound-title">
-      <div class="section-head"><h2 id="bound-title">证据边界</h2></div>
+    <section class="section panel" aria-labelledby="bound-title">
+      <div class="section-head"><h2 id="bound-title" tabindex="-1">证据边界</h2></div>
       <ul class="bounds">
         <li>异常是统计偏离提示，需要人工核验；平台不自动发布、不派发任务、不认定责任。</li>
         <li>“当时已知”回放只使用到达时间（available_at）不晚于游标的数据；物理指标以通告所在小时为可用时刻，社会指标在该小时结束后可用。</li>
@@ -210,6 +221,6 @@ const metricCsv = computed(() => api.exportUrl('metrics', ctx.params))
 .bounds {
   padding-left: 18px;
   line-height: 1.8;
-  color: #334155;
+  color: var(--text-secondary);
 }
 </style>

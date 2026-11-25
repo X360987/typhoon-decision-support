@@ -138,30 +138,43 @@ async function runPrediction() {
       <span class="muted small">只有提前 {{ mlHorizon }} 小时使用树模型，其余提前量为朴素基线；预测不能替代业务判断。</span>
     </div>
     <ContextGate>
-      <div class="params">
-        <label class="field">
-          <span>目标</span>
-          <select v-model="target" class="input">
-            <option v-for="t in targets" :key="t.id" :value="t.id">{{ t.name }}</option>
-          </select>
-        </label>
-        <label class="field">
-          <span>起点</span>
-          <select class="input" :value="origin || run?.origin_time || ''" @change="chooseOrigin">
-            <option v-for="o in preds.data.value?.available_origins || []" :key="o" :value="o">{{ fmtTime(o) }}</option>
-          </select>
-        </label>
-        <label class="field">
-          <span>新起点</span>
-          <input v-model="customOrigin" class="input" type="datetime-local" step="3600" :min="ctx.event?.start_time.slice(0, 16)" :max="ctx.event?.end_time.slice(0, 16)" />
-        </label>
-        <div class="field">
-          <span>提前量</span>
-          <div class="seg" role="group" aria-label="提前量">
-            <button v-for="h in horizons" :key="h" type="button" :class="{ on: lead === h }" @click="lead = h">{{ h }} 小时</button>
+      <div class="panel params">
+        <section aria-labelledby="prediction-view-title">
+          <div class="section-head">
+            <h2 id="prediction-view-title">查看已有预测</h2>
+            <RouterLink class="right small" :to="{ name: 'glossary', hash: '#model-title' }">预测模型说明 →</RouterLink>
           </div>
-        </div>
-        <button type="button" class="btn primary run" :disabled="runState.status === 'running'" @click="runPrediction">运行预测</button>
+          <div class="params-fields">
+            <label class="field">
+              <span>目标</span>
+              <select v-model="target" class="input">
+                <option v-for="t in targets" :key="t.id" :value="t.id">{{ t.name }}</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>已有起点</span>
+              <select class="input" :value="origin || run?.origin_time || ''" @change="chooseOrigin">
+                <option v-for="o in preds.data.value?.available_origins || []" :key="o" :value="o">{{ fmtTime(o) }}</option>
+              </select>
+            </label>
+            <div class="field lead-field">
+              <span>提前量</span>
+              <div class="seg" role="group" aria-label="提前量">
+                <button v-for="h in horizons" :key="h" type="button" :class="{ on: lead === h }" :aria-pressed="lead === h" @click="lead = h">{{ h }} 小时</button>
+              </div>
+            </div>
+          </div>
+        </section>
+        <details class="run-params" :open="preds.status.value === 'ready' && !run">
+          <summary>发起新预测</summary>
+          <div class="params-fields run-fields">
+            <label class="field">
+              <span>新起点</span>
+              <input v-model="customOrigin" class="input" type="datetime-local" step="3600" :min="ctx.event?.start_time.slice(0, 16)" :max="ctx.event?.end_time.slice(0, 16)" />
+            </label>
+            <button type="button" class="btn primary run" :disabled="runState.status === 'running'" @click="runPrediction">运行预测</button>
+          </div>
+        </details>
       </div>
       <p v-if="runState.text" class="note small" :class="runState.status === 'failed' ? 'bad' : 'info'" role="status">{{ runState.text }}</p>
 
@@ -174,7 +187,7 @@ async function runPrediction() {
         @retry="preds.reload"
       />
 
-      <section v-if="run" aria-label="预测曲线">
+      <section v-if="run" class="panel" aria-label="预测曲线">
         <div class="section-head">
           <h2>{{ targetMeta?.name }}（{{ targetMeta?.unit }}） · {{ provinceName(unit) }}</h2>
           <span class="muted small">横轴同时包含起点前观测与起点后预测时段</span>
@@ -187,7 +200,7 @@ async function runPrediction() {
             ...(after.length ? [{ name: '事后实际（复盘对照）', data: after, color: COLORS.muted }] : []),
           ]"
           :axes="[{ name: targetMeta?.unit || '' }]"
-          :markers="[{ time: originTime, label: '预测起点', color: '#2563EB' }]"
+          :markers="[{ time: originTime, label: '预测起点', color: COLORS.accent }]"
           :x-min="xMin"
           :x-max="xMax"
           :height="320"
@@ -239,14 +252,28 @@ async function runPrediction() {
 
 <style scoped>
 .params {
+  margin-bottom: 14px;
+}
+.params-fields {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 12px 18px;
-  margin-bottom: 14px;
+}
+.run-params {
+  border-top: 1px solid var(--line);
+  margin-top: 12px;
+  padding-top: 9px;
+}
+.run-params summary {
+  width: fit-content;
+  cursor: pointer;
+  font-weight: 600;
+}
+.run-fields {
+  margin-top: 10px;
 }
 .run {
-  margin-left: auto;
   min-width: 120px;
   justify-content: center;
 }
@@ -258,7 +285,7 @@ async function runPrediction() {
   margin: 10px 0;
   border-top: 1px solid var(--line);
   border-bottom: 1px solid var(--line);
-  color: #334155;
+  color: var(--text-secondary);
 }
 .prov b {
   font-weight: 600;
@@ -269,9 +296,41 @@ tr.sel td {
   background: var(--accent-soft);
 }
 .up {
-  color: #b8661a;
+  color: var(--attn);
 }
 .down {
   color: var(--accent);
+}
+@media (max-width: 760px) {
+  .params-fields {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: start;
+    gap: 8px;
+  }
+  .params-fields .lead-field,
+  .run-fields {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .params-fields .lead-field {
+    grid-column: 1 / -1;
+  }
+  .params .field {
+    display: grid;
+    min-width: 0;
+    gap: 3px;
+  }
+  .params .input {
+    width: 100%;
+    min-width: 0;
+  }
+  .params .seg {
+    max-width: 100%;
+    overflow-x: auto;
+  }
+  .params .seg button {
+    padding-inline: 9px;
+    font-size: 12px;
+  }
 }
 </style>

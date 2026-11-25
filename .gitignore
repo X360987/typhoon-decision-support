@@ -1,0 +1,12 @@
+node_modules/
+frontend/dist/
+frontend/e2e-shots/
+
+__pycache__/
+*.pyc
+.venv/
+backend/typhoon_platform.db
+backend/artifacts/
+
+.env
+.env.local

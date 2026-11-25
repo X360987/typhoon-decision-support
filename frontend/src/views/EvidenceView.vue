@@ -21,6 +21,13 @@ const tab = ref<'basis' | 'raw' | 'history'>('basis')
 const note = ref('')
 const submitting = ref(false)
 const feedback = ref<{ ok: boolean; text: string } | null>(null)
+const listPanel = ref<HTMLElement | null>(null)
+const backButton = ref<HTMLButtonElement | null>(null)
+let listPosition: { id: number; top: number } | null = null
+
+function isNarrow() {
+  return window.matchMedia('(max-width: 1100px)').matches
+}
 
 const selectedId = computed(() => (route.params.id ? Number(route.params.id) : null))
 const filters = computed(() => ({ ...ctx.params, analysis_scope: scope.value || undefined, dimension: dimension.value || undefined }))
@@ -61,14 +68,17 @@ const mismatch = computed(() => {
 watch(
   () => ctx.scopeKey,
   (now, before) => {
-    if (before && now !== before && selectedId.value != null) void router.replace({ name: 'evidence' })
+    if (before && now !== before) {
+      listPosition = null
+      if (selectedId.value != null) void router.replace({ name: 'evidence', params: { id: '' } })
+    }
   },
 )
 
 watch(
   () => list.data.value,
   (v) => {
-    if (selectedId.value == null && v?.items.length && window.matchMedia('(min-width: 1100px)').matches) {
+    if (selectedId.value == null && v?.items.length && window.matchMedia('(width > 1100px)').matches) {
       void router.replace({ name: 'evidence', params: { id: v.items[0].id } })
     }
   },
@@ -80,12 +90,35 @@ watch(selectedId, () => {
   tab.value = 'basis'
 })
 
+watch(backButton, (button) => {
+  if (!button || !isNarrow()) return
+  window.scrollTo({ top: 0, behavior: 'instant' })
+  button.focus({ preventScroll: true })
+}, { flush: 'post' })
+
+watch(selectedId, (id, previous) => {
+  if (id !== null || previous === null || !isNarrow()) return
+  const saved = listPosition
+  const target = saved && listPanel.value?.querySelector<HTMLElement>(`[data-anomaly="${saved.id}"]`)
+  const focusTarget = target || listPanel.value?.querySelector<HTMLElement>('#list-title')
+  window.scrollTo({ top: target && saved ? saved.top : 0, behavior: 'instant' })
+  focusTarget?.focus({ preventScroll: true })
+}, { flush: 'post' })
+
 const totalPages = computed(() => Math.max(1, Math.ceil((list.data.value?.total || 0) / PAGE_SIZE)))
 const rawEvidence = computed(() => (d.value?.evidences || []).filter((e) => e.source))
 const metricEvidence = computed(() => (d.value?.evidences || []).filter((e) => !e.source))
 
 function select(id: number) {
+  if (isNarrow() && selectedId.value === null) {
+    listPosition = { id, top: window.scrollY }
+  }
   void router.push({ name: 'evidence', params: { id } })
+}
+
+function backToList() {
+  if (router.options.history.state.back === '/evidence') router.back()
+  else void router.replace({ name: 'evidence', params: { id: '' } })
 }
 
 function onKey(e: KeyboardEvent, index: number) {
@@ -123,10 +156,10 @@ const exportHref = computed(() => api.exportUrl('anomalies', filters.value))
 <template>
   <div class="page evidence">
     <ContextGate>
-      <div class="split">
-        <section class="list-col" aria-labelledby="list-title">
+      <div class="split" :class="{ 'has-selection': selectedId !== null }">
+        <section ref="listPanel" class="panel list-col" aria-labelledby="list-title">
           <div class="list-head">
-            <h2 id="list-title">异常事件列表</h2>
+            <h2 id="list-title" tabindex="-1">异常事件列表</h2>
             <a class="small" :href="exportHref" download>导出 CSV</a>
           </div>
           <div class="filters">
@@ -183,7 +216,10 @@ const exportHref = computed(() => api.exportUrl('anomalies', filters.value))
           </div>
         </section>
 
-        <section class="detail-col" aria-live="polite">
+        <section class="panel detail-col" aria-live="polite">
+          <button v-if="selectedId !== null" ref="backButton" type="button" class="btn back-to-list" @click="backToList">
+            ‹ 返回列表
+          </button>
           <p v-if="selectedId == null" class="muted">从左侧选择一条异常查看证据。</p>
           <template v-else>
             <p v-if="mismatch" class="note attn">该异常不属于当前数据集或事件，已清除详情。</p>
@@ -296,18 +332,11 @@ const exportHref = computed(() => api.exportUrl('anomalies', filters.value))
 </template>
 
 <style scoped>
-.evidence {
-  padding-top: 0;
-  padding-bottom: 0;
-}
 .split {
   display: grid;
   grid-template-columns: minmax(280px, 32fr) minmax(0, 68fr);
-  min-height: calc(100vh - var(--top-h));
-}
-.list-col {
-  border-right: 1px solid var(--line);
-  padding: 20px 16px 20px 0;
+  align-items: start;
+  gap: 16px;
 }
 .list-head {
   display: flex;
@@ -321,6 +350,7 @@ const exportHref = computed(() => api.exportUrl('anomalies', filters.value))
 }
 .filters select {
   flex: 1;
+  min-width: 0;
 }
 .items {
   list-style: none;
@@ -342,9 +372,13 @@ const exportHref = computed(() => api.exportUrl('anomalies', filters.value))
   background: var(--accent-soft);
   box-shadow: inset 3px 0 0 var(--accent);
 }
+.item:hover:not(.on) {
+  background: var(--surface-tint);
+}
 .row1 {
   display: flex;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 8px;
   color: var(--muted);
   font-size: 12px;
@@ -359,7 +393,7 @@ const exportHref = computed(() => api.exportUrl('anomalies', filters.value))
   color: var(--danger);
 }
 .rv.need_evidence {
-  color: #b8661a;
+  color: var(--attn);
 }
 .pager {
   display: flex;
@@ -367,12 +401,11 @@ const exportHref = computed(() => api.exportUrl('anomalies', filters.value))
   justify-content: space-between;
   margin-top: 12px;
 }
-.detail-col {
-  padding: 22px 0 28px 28px;
-  min-width: 0;
-}
 .detail-col h1 {
   margin-bottom: 10px;
+}
+.back-to-list {
+  display: none;
 }
 .tabs {
   margin: 12px 0 14px;
@@ -381,7 +414,7 @@ const exportHref = computed(() => api.exportUrl('anomalies', filters.value))
   display: flex;
   flex-wrap: wrap;
   gap: 4px 18px;
-  color: #334155;
+  color: var(--text-secondary);
 }
 .facts b {
   color: var(--muted);
@@ -405,8 +438,10 @@ const exportHref = computed(() => api.exportUrl('anomalies', filters.value))
 }
 blockquote {
   margin: 8px 0;
-  padding: 4px 14px;
+  padding: 8px 14px;
   border-left: 3px solid var(--accent);
+  border-radius: 5px;
+  background: var(--surface-tint);
   font-size: 15px;
   line-height: 1.8;
 }
@@ -435,13 +470,13 @@ blockquote {
   .split {
     grid-template-columns: 1fr;
   }
-  .list-col {
-    border-right: 0;
-    border-bottom: 1px solid var(--line);
-    padding-right: 0;
+  .split.has-selection .list-col,
+  .split:not(.has-selection) .detail-col {
+    display: none;
   }
-  .detail-col {
-    padding-left: 0;
+  .back-to-list {
+    display: inline-flex;
+    margin-bottom: 12px;
   }
 }
 </style>

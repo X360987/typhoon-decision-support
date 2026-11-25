@@ -14,7 +14,7 @@ onMounted(() => {
 
 <template>
   <a class="skip" href="#main">跳到主要内容</a>
-  <TopBar @toggle-nav="navOpen = !navOpen" />
+  <TopBar :nav-open="navOpen" @toggle-nav="navOpen = !navOpen" />
   <SideNav :open="navOpen" @navigate="navOpen = false" />
   <div v-if="navOpen" class="scrim" aria-hidden="true" @click="navOpen = false"></div>
   <main id="main" class="main" tabindex="-1">
@@ -39,7 +39,7 @@ onMounted(() => {
   top: 0;
   z-index: 2000;
   padding: 8px 12px;
-  background: #fff;
+  background: var(--surface);
 }
 .skip:focus {
   left: 8px;
@@ -55,7 +55,8 @@ onMounted(() => {
     display: block;
     position: fixed;
     inset: var(--top-h) 0 0 0;
-    background: rgba(16, 42, 67, 0.2);
+    background: rgba(3, 6, 12, 0.68);
+    backdrop-filter: blur(4px);
     z-index: 800;
   }
 }

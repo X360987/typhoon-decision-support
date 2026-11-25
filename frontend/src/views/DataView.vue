@@ -2,14 +2,19 @@
 import { computed, reactive, ref, watch } from 'vue'
 import { api, credentials } from '../api/client'
 import type { CommitResult, PrecheckReport } from '../api/types'
+import SectionNav from '../components/SectionNav.vue'
 import StatusNote from '../components/StatusNote.vue'
 import { useLoader } from '../composables/useLoader'
 import { errorText, fmtTime, provinceName } from '../lib/format'
 import { useContextStore } from '../stores/context'
 
 const ctx = useContextStore()
+const sections = [
+  { id: 'import-steps', label: '导入数据' },
+  { id: 'cov-title', label: '覆盖与质量' },
+  { id: 'ver-title', label: '分析版本' },
+]
 
-// ---- import stepper
 const STEPS = ['选择文件', '字段映射', '预检', '确认导入']
 const step = ref(0)
 const entity = ref('weibo')
@@ -48,10 +53,10 @@ const batches = useLoader((signal) => api.batches(ctx.datasetId, signal), () => 
 const coverage = useLoader(
   (signal) => api.coverage({ dataset_id: ctx.datasetId, event_id: ctx.eventId, data_version: ctx.dataVersion || undefined }, signal),
   () => [ctx.scopeKey, ctx.revision],
-  { enabled: () => ctx.ready },
+  { enabled: () => ctx.ready && !ctx.dailyStats },
 )
 const runs = useLoader((signal) => api.runs({ dataset_id: ctx.datasetId, event_id: ctx.eventId }, signal), () => [ctx.scopeKey, ctx.revision], {
-  enabled: () => ctx.ready,
+  enabled: () => ctx.ready && !ctx.dailyStats,
 })
 
 watch(
@@ -70,19 +75,31 @@ const mappingPayload = computed(() => {
   return out
 })
 const hasMapping = computed(() => Object.keys(mappingPayload.value).length > 0)
+const hasMappingStep = computed(() => entity.value === 'weibo' && !ctx.dailyStats)
+const visibleSteps = computed(() =>
+  STEPS.map((label, index) => ({ label, index })).filter(({ index }) => index !== 1 || hasMappingStep.value),
+)
+const isRailSource = (source: string) => ['rail', 'rail_manual', 'trains'].includes(source)
 const blockingRows = computed(() => (report.value?.error_rows || []).filter((r) => r.blocking))
-const canCommit = computed(() => {
-  if (!report.value?.precheck_token) return false
-  if (policy.value === 'strict') return report.value.ok
-  return confirmSkip.value
-})
+const skipAllowed = computed(() => report.value?.allowed_policies.includes('skip_errors') ?? false)
 const commitBlockReason = computed(() => {
-  if (!report.value) return ''
-  if (!report.value.precheck_token) return `预检未通过结构检查（${report.value.message || report.value.error}），不能提交。`
-  if (policy.value === 'strict' && !report.value.ok) return `存在 ${report.value.blocking_errors} 行阻断错误，严格模式不能导入。可修正文件后重新预检，或改为“跳过错误行”并确认排除清单。`
-  if (policy.value === 'skip_errors' && !confirmSkip.value) return '跳过错误行需要先勾选确认排除清单。'
+  const checked = report.value
+  if (!checked) return ''
+  if (!checked.precheck_token) return checked.message || checked.error || '预检未通过结构检查，请修正文件后重新预检。'
+  if (policy.value === 'strict') {
+    if (checked.blocking_errors > 0) {
+      const nextStep = skipAllowed.value ? '可修正后重新预检，或选择“跳过错误行”并确认。' : '请修正后重新预检。'
+      return `发现 ${checked.blocking_errors} 项阻断错误，严格模式不能导入。${nextStep}`
+    }
+    if (!checked.ok || !checked.allowed_policies.includes('strict')) return '当前预检结果不允许严格导入，请检查文件或重新预检。'
+  } else {
+    if (!skipAllowed.value) return '当前预检结果不允许跳过错误行。'
+    if (!confirmSkip.value) return '跳过错误行需要先勾选确认排除清单。'
+  }
   return ''
 })
+const canCommit = computed(() => !!report.value?.precheck_token && !commitBlockReason.value)
+const usesMapping = computed(() => hasMappingStep.value && columns.value.length > 0)
 
 async function onFile(e: Event) {
   const f = (e.target as HTMLInputElement).files?.[0] || null
@@ -105,7 +122,7 @@ function form(extra: Record<string, string>) {
   if (file.value) fd.append('file', file.value)
   fd.append('dataset_id', ctx.datasetId)
   fd.append('event_id', String(importEvent.value ?? ''))
-  if (hasMapping.value) fd.append('column_mapping', JSON.stringify(mappingPayload.value))
+  if (hasMappingStep.value && hasMapping.value) fd.append('column_mapping', JSON.stringify(mappingPayload.value))
   for (const [k, v] of Object.entries(extra)) fd.append(k, v)
   return fd
 }
@@ -128,7 +145,7 @@ async function runPrecheck() {
 }
 
 async function runCommit() {
-  if (!report.value?.precheck_token || !canCommit.value) return
+  if (busy.value || !report.value?.precheck_token || !canCommit.value) return
   busy.value = true
   importError.value = ''
   try {
@@ -146,8 +163,17 @@ async function runCommit() {
 }
 
 function next() {
-  if (columns.value.length) step.value = 1
+  if (usesMapping.value) step.value = 1
   else void runPrecheck()
+}
+
+function previewStatus(row: number, status: PrecheckReport['preview'][number]['status']) {
+  const reasons = [...new Set(report.value?.error_rows.filter((entry) => entry.row === row).flatMap((entry) => entry.reasons))]
+  return reasons.join('；') || (status === 'error' ? '该行存在错误' : '该行有警告')
+}
+
+function batchExcluded(batch: { status: string; excluded_rows?: number; report?: { error_count: number } }) {
+  return batch.excluded_rows ?? (batch.status === 'committed' ? batch.report?.error_count : undefined)
 }
 
 function resetImport() {
@@ -251,6 +277,7 @@ const METRIC_LABEL: Record<string, string> = {
 const matrixRows = computed(() =>
   Object.entries(coverage.data.value?.metric_matrix || {}).sort(([a], [b]) => (a === 'ALL' ? -1 : b === 'ALL' ? 1 : a.localeCompare(b))),
 )
+const sectionsPending = computed(() => [sources, batches, coverage, runs].some((loader) => loader.status.value === 'loading'))
 </script>
 
 <template>
@@ -261,15 +288,16 @@ const matrixRows = computed(() =>
       <span class="tag" :class="ctx.dataMode === 'real' ? 'real' : 'demo'">{{ ctx.dataMode === 'real' ? '真实模式' : '模拟模式' }}</span>
     </div>
 
-    <ol class="stepper" aria-label="导入步骤">
-      <li v-for="(s, i) in STEPS" :key="s" :class="{ done: i < step, on: i === step }" :aria-current="i === step ? 'step' : undefined">
-        <span class="circle">{{ i + 1 }}</span>{{ s }}
+    <SectionNav v-if="ctx.ready" label="数据管理目录" :sections="sections" :pending="sectionsPending" />
+    <ol id="import-steps" class="stepper" aria-label="导入步骤" tabindex="-1">
+      <li v-for="({ label, index }, i) in visibleSteps" :key="index" :class="{ done: index < step, on: index === step }" :aria-current="index === step ? 'step' : undefined">
+        <span class="circle">{{ i + 1 }}</span>{{ label }}
       </li>
     </ol>
 
     <p v-if="!ctx.datasetId" class="note">当前没有数据集。请先在下方登记事件（会同时创建数据集），再导入文件。</p>
 
-    <section v-if="step === 0" class="import-step">
+    <section v-if="step === 0" class="panel import-step">
       <div class="row">
         <label class="field">
           <span>数据来源</span>
@@ -291,8 +319,11 @@ const matrixRows = computed(() =>
         </label>
       </div>
       <p class="muted small">
-        支持 CSV / XLSX，单文件不超过 {{ sources.data.value?.max_upload_mb ?? 20 }} MB。必填字段：{{ REQUIRED.join('、') }}；建议提供 available_at（数据实际到达时间），否则导入后不能用于当时已知回放。模板见后端
-        data/templates/weibo_template.csv。
+        单文件不超过 {{ sources.data.value?.max_upload_mb ?? 20 }} MB。
+        <template v-if="entity === 'rail_manual'">上传原始 XLSX 工作簿，保留「ID_type长表」工作表。</template>
+        <template v-else-if="entity === 'weibo' && ctx.dailyStats">上传保留原始列名的微博 CSV 或 XLSX，微博 ID、正文和发布时间会在预检时校验。</template>
+        <template v-else-if="entity === 'weibo'">支持 CSV / XLSX。必填字段为 {{ REQUIRED.join('、') }}。需要当时已知回放时，请同时提供 available_at（数据实际到达时间）。</template>
+        <template v-else>上传保留原始列名的 CSV 或 XLSX。</template>
       </p>
       <ul class="sources small">
         <li v-for="s in sources.data.value?.items || []" :key="s.entity">
@@ -302,7 +333,7 @@ const matrixRows = computed(() =>
       <button type="button" class="btn primary" :disabled="!file || importEvent == null || busy" @click="next">下一步</button>
     </section>
 
-    <section v-else-if="step === 1" class="import-step">
+    <section v-else-if="step === 1" class="panel import-step">
       <h2>字段映射 · {{ file?.name }}</h2>
       <p class="muted small">左侧为文件列名，右侧选择对应的平台字段；留空表示保持原列名。</p>
       <div class="table-wrap narrow">
@@ -333,12 +364,12 @@ const matrixRows = computed(() =>
       </div>
     </section>
 
-    <section v-else-if="step === 2" class="import-step">
+    <section v-else-if="step === 2" class="panel import-step">
       <div class="file-head">
         <h2>{{ report?.file_name || file?.name }}</h2>
         <span v-if="report" class="muted">
-          {{ report.rows }} 行 / <span :class="{ bad: report.blocking_errors }">{{ report.blocking_errors }} 行阻断错误</span> / {{ report.duplicates }} 行重复 /
-          {{ report.warnings }} 行警告
+          {{ report.rows }} 行 / <span :class="{ bad: report.blocking_errors }">{{ report.blocking_errors }} 项阻断错误</span> / {{ report.duplicates }} 条重复 /
+          {{ report.warnings }} 项警告
         </span>
       </div>
       <p v-if="busy" class="muted">预检中…</p>
@@ -349,23 +380,23 @@ const matrixRows = computed(() =>
               <thead>
                 <tr>
                   <th>行号</th>
-                  <th>发布时间</th>
-                  <th>地区</th>
-                  <th>内容</th>
+                  <th v-if="report.entity === 'weibo'">发布时间</th>
+                  <th v-if="report.entity === 'weibo'">地区</th>
+                  <th v-if="report.entity === 'weibo' || isRailSource(report.entity)">{{ report.entity === 'weibo' ? '内容' : '车次' }}</th>
                   <th>检查结果</th>
                 </tr>
               </thead>
               <tbody>
-                <tr v-for="r in report.preview" :key="r.row">
+                <tr v-for="(r, index) in report.preview" :key="index">
                   <td class="num">{{ r.row }}</td>
-                  <td class="num" :class="{ bad: !r.published_at }">{{ r.published_at ? fmtTime(r.published_at) : '无法解析' }}</td>
-                  <td>{{ r.publish_location || '—' }}</td>
-                  <td>{{ r.content }}</td>
+                  <td v-if="report.entity === 'weibo'" class="num">{{ fmtTime(r.published_at) }}</td>
+                  <td v-if="report.entity === 'weibo'">{{ r.publish_location || '—' }}</td>
+                  <td v-if="report.entity === 'weibo' || isRailSource(report.entity)">{{ r.content || '—' }}</td>
                   <td>
                     <span v-if="r.status === 'ok'" class="ok-text">✓ 正常</span>
-                    <span v-else-if="r.status === 'error'" class="bad">! {{ report.error_rows.find((e) => e.row === r.row)?.reasons.join('；') }}</span>
+                    <span v-else-if="r.status === 'error'" class="bad">! {{ previewStatus(r.row, r.status) }}</span>
                     <span v-else-if="r.status === 'duplicate'" class="warn-text">重复，不导入</span>
-                    <span v-else class="warn-text">{{ report.error_rows.find((e) => e.row === r.row)?.reasons.join('；') }}</span>
+                    <span v-else class="warn-text">{{ previewStatus(r.row, r.status) }}</span>
                   </td>
                 </tr>
               </tbody>
@@ -376,12 +407,13 @@ const matrixRows = computed(() =>
           <fieldset class="policy">
             <legend>错误行策略</legend>
             <label><input v-model="policy" type="radio" value="strict" :disabled="!report.precheck_token" /> 严格：有阻断错误则不导入</label>
-            <label><input v-model="policy" type="radio" value="skip_errors" :disabled="!report.allowed_policies.includes('skip_errors')" /> 跳过错误行：其余行导入，错误行记录到批次</label>
-            <div v-if="policy === 'skip_errors' && blockingRows.length" class="skip-list">
-              <p class="small">将排除以下 {{ blockingRows.length }} 行：</p>
-              <ul class="small">
-                <li v-for="r in blockingRows.slice(0, 20)" :key="r.row">第 {{ r.row }} 行：{{ r.reasons.join('；') }}</li>
-                <li v-if="blockingRows.length > 20" class="muted">…另有 {{ blockingRows.length - 20 }} 行</li>
+            <label><input v-model="policy" type="radio" value="skip_errors" :disabled="!skipAllowed" /> 跳过错误行：其余行导入，错误行记录到批次</label>
+            <div v-if="policy === 'skip_errors'" class="skip-list">
+              <p v-if="blockingRows.length" class="small">以下问题涉及的记录将排除。</p>
+              <p v-else class="small">当前预检未发现阻断错误。</p>
+              <ul v-if="blockingRows.length" class="small">
+                <li v-for="(r, index) in blockingRows.slice(0, 20)" :key="index">第 {{ r.row }} 行：{{ r.reasons.join('；') }}</li>
+                <li v-if="blockingRows.length > 20" class="muted">…另有 {{ blockingRows.length - 20 }} 项</li>
               </ul>
               <label><input v-model="confirmSkip" type="checkbox" /> 我已核对排除清单，确认只导入其余行</label>
             </div>
@@ -389,13 +421,14 @@ const matrixRows = computed(() =>
 
           <p v-if="commitBlockReason" class="note attn" role="status">{{ commitBlockReason }}</p>
           <div class="actions">
-            <button type="button" class="btn" @click="step = columns.length ? 1 : 0">返回{{ columns.length ? '映射' : '' }}</button>
+            <button type="button" class="btn" :disabled="busy" @click="step = usesMapping ? 1 : 0">返回{{ usesMapping ? '映射' : '' }}</button>
             <button type="button" class="btn primary" :disabled="!canCommit || busy" @click="runCommit">确认导入</button>
           </div>
         </div>
         <aside class="quality">
           <h3>数据质量检查</h3>
-          <ul>
+          <p v-if="!report.checks.length" class="small muted">校验结果见预览和阻断错误清单。</p>
+          <ul v-else>
             <li v-for="c in report.checks" :key="c.name" :class="c.status">
               <span class="icon" aria-hidden="true">{{ c.status === 'pass' ? '✓' : '!' }}</span>
               <div>
@@ -409,25 +442,26 @@ const matrixRows = computed(() =>
       </div>
     </section>
 
-    <section v-else class="import-step">
+    <section v-else class="panel import-step">
       <h2>导入结果</h2>
       <dl v-if="result" class="result">
         <dt>导入状态</dt>
         <dd>{{ result.import_status === 'idempotent_reuse' ? '同一文件已导入过，复用原批次（未重复写入）' : '已导入' }} · 批次 #{{ result.batch_id }}</dd>
-        <dt>写入 / 跳过重复</dt>
+        <dt>写入 / 跳过</dt>
         <dd>{{ result.inserted ?? '—' }} / {{ result.skipped ?? '—' }}</dd>
         <dt>分析状态</dt>
         <dd>
-          <span class="tag" :class="result.analysis_status === 'success' ? 'ok' : 'bad'">
-            {{ result.analysis_status === 'success' ? '分析成功，新版本已生效' : `分析失败（${result.analysis_status}），继续使用原版本，可在下方重跑` }}
-          </span>
+          <span v-if="result.analysis_status === 'success'" class="tag ok">分析成功，新版本已生效</span>
+          <span v-else-if="result.analysis_status === 'not_integrated'" class="tag info">算法尚未接入</span>
+          <span v-else-if="result.analysis_status" class="tag bad">分析失败（{{ result.analysis_status }}），继续使用原版本，可在下方重跑</span>
+          <span v-else class="muted">暂无分析状态</span>
         </dd>
       </dl>
       <button type="button" class="btn" @click="resetImport">继续导入</button>
     </section>
     <p v-if="importError" class="note bad" role="alert">{{ importError }}</p>
 
-    <section class="section" aria-labelledby="batch-title">
+    <section class="section panel" aria-labelledby="batch-title">
       <div class="section-head"><h2 id="batch-title">近期导入历史</h2></div>
       <StatusNote :status="batches.status.value" :error="batches.error.value" :empty="!batches.data.value?.items.length" empty-text="暂无导入批次。" @retry="batches.reload" />
       <div v-if="batches.data.value?.items.length" class="table-wrap">
@@ -451,11 +485,11 @@ const matrixRows = computed(() =>
               <td>{{ b.file_name || '—' }}</td>
               <td>{{ b.source_type }}</td>
               <td class="num">{{ fmtTime(b.created_at) }}</td>
-              <td class="num">{{ b.inserted ?? '—' }}</td>
-              <td class="num">{{ b.excluded_rows }}</td>
-              <td>{{ b.status }}</td>
-              <td>{{ b.analysis_status || '—' }}</td>
-              <td><button v-if="b.excluded_rows" type="button" class="btn ghost" @click="showErrors(b.id)">错误行</button></td>
+              <td class="num">{{ b.inserted ?? (b.status === 'committed' ? b.report?.inserted : null) ?? '—' }}</td>
+              <td class="num">{{ batchExcluded(b) ?? '—' }}</td>
+              <td>{{ b.status === 'committed' ? '已导入' : b.status === 'previewed' ? '已预检' : b.status }}</td>
+              <td>{{ b.analysis_status === 'not_integrated' || (ctx.dailyStats && b.status === 'committed') ? '算法尚未接入' : b.analysis_status || '—' }}</td>
+              <td><button v-if="batchExcluded(b)" type="button" class="btn ghost" @click="showErrors(b.id)">错误行</button></td>
             </tr>
           </tbody>
         </table>
@@ -468,12 +502,13 @@ const matrixRows = computed(() =>
       </div>
     </section>
 
-    <section v-if="ctx.ready" class="section" aria-labelledby="cov-title">
+    <section v-if="ctx.ready" class="section panel" aria-labelledby="cov-title">
       <div class="section-head">
-        <h2 id="cov-title">覆盖与质量 · {{ ctx.event?.name }}</h2>
-        <span class="muted small">事件共 {{ coverage.data.value?.event_hours ?? '—' }} 小时；单元格为“有观测小时 / 样本数”</span>
+        <h2 id="cov-title" tabindex="-1">覆盖与质量 · {{ ctx.event?.name }}</h2>
+        <span v-if="!ctx.dailyStats" class="muted small">事件共 {{ coverage.data.value?.event_hours ?? '—' }} 小时；单元格为“有观测小时 / 样本数”</span>
       </div>
-      <StatusNote :status="coverage.status.value" :error="coverage.error.value" @retry="coverage.reload" />
+      <p v-if="ctx.dailyStats" class="muted small">逐项校验结果见文件预检和批次的错误清单。省级小时覆盖统计尚未接入。</p>
+      <StatusNote v-else :status="coverage.status.value" :error="coverage.error.value" @retry="coverage.reload" />
       <div v-if="coverage.data.value" class="table-wrap">
         <table class="data">
           <thead>
@@ -502,13 +537,16 @@ const matrixRows = computed(() =>
       </ul>
     </section>
 
-    <section v-if="ctx.ready" class="section" aria-labelledby="ver-title">
+    <section v-if="ctx.ready" class="section panel" aria-labelledby="ver-title">
       <div class="section-head">
-        <h2 id="ver-title">分析版本</h2>
-        <span class="muted small">每次分析生成新版本，全部阶段成功后才切换；失败时保留原版本。</span>
-        <button type="button" class="btn right" @click="rerun">重跑当前事件</button>
+        <h2 id="ver-title" tabindex="-1">分析版本</h2>
+        <template v-if="!ctx.dailyStats">
+          <span class="muted small">每次分析生成新版本，全部阶段成功后才切换；失败时保留原版本。</span>
+          <button type="button" class="btn right" @click="rerun">重跑当前事件</button>
+        </template>
       </div>
-      <div class="table-wrap">
+      <p v-if="ctx.dailyStats" class="muted small">算法尚未接入，导入的数据可在事件总览查看日统计。</p>
+      <div v-else class="table-wrap">
         <table class="data">
           <thead>
             <tr>
@@ -552,13 +590,14 @@ const matrixRows = computed(() =>
 
     <p v-if="opMessage" class="note" :class="opMessage.ok ? 'info' : 'bad'" role="status">{{ opMessage.text }}</p>
 
-    <section class="section settings" aria-labelledby="set-title">
+    <section class="section panel settings" aria-labelledby="set-title">
       <h2 id="set-title">写操作与事件登记</h2>
       <div class="settings-grid">
         <form class="block" @submit.prevent="saveCredentials">
           <h3>写操作凭证</h3>
           <p class="muted small">
-            {{ ctx.health?.write_requires_key ? '服务端要求 X-API-Key 才能导入、重跑、预测、核验或登记事件。' : '服务端未配置 API_KEY（仅模拟模式允许免密写入）。' }}
+            <template v-if="ctx.dailyStats">预检、导入和事件登记需要填写 API Key 和操作者。操作者可使用英文名或拼音，例如 zhangsan。</template>
+            <template v-else>{{ ctx.health?.write_requires_key ? '服务端要求 X-API-Key 才能导入、重跑、预测、核验或登记事件。' : '服务端未配置 API_KEY（仅模拟模式允许免密写入）。' }}</template>
             凭证只保存在当前浏览器标签页（sessionStorage）。
           </p>
           <label class="field"><span>API Key</span><input v-model="apiKey" class="input" type="password" autocomplete="off" /></label>
@@ -591,9 +630,12 @@ const matrixRows = computed(() =>
 .stepper {
   display: flex;
   list-style: none;
-  padding: 0;
-  margin: 0 0 22px;
+  padding: 12px 14px;
+  margin: 0 0 14px;
   gap: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--panel-radius);
+  background: var(--surface);
 }
 .stepper li {
   flex: 1;
@@ -617,7 +659,7 @@ const matrixRows = computed(() =>
   border: 1px solid var(--line-strong);
   display: inline-grid;
   place-items: center;
-  background: #fff;
+  background: var(--surface-tint);
 }
 .stepper li.on {
   color: var(--text);
@@ -625,7 +667,7 @@ const matrixRows = computed(() =>
 .stepper li.on .circle {
   background: var(--obs);
   border-color: var(--obs);
-  color: #fff;
+  color: var(--on-accent);
 }
 .stepper li.done .circle {
   border-color: var(--obs);
@@ -633,6 +675,7 @@ const matrixRows = computed(() =>
 }
 .import-step {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 12px;
 }
 .import-step > .btn,
@@ -691,7 +734,7 @@ const matrixRows = computed(() =>
   border-radius: 50%;
   display: grid;
   place-items: center;
-  color: #fff;
+  color: var(--on-accent);
   font-size: 12px;
   background: var(--ok);
 }
@@ -719,7 +762,7 @@ const matrixRows = computed(() =>
   color: var(--ok);
 }
 .warn-text {
-  color: #b8661a;
+  color: var(--attn);
 }
 .missing {
   color: var(--faint);
@@ -739,14 +782,14 @@ const matrixRows = computed(() =>
 .facts {
   margin-top: 10px;
   padding-left: 18px;
-  color: #334155;
+  color: var(--text-secondary);
 }
 .errors {
   margin-top: 10px;
 }
 .settings-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(280px, 100%), 1fr));
   gap: 26px;
   margin-top: 12px;
 }
@@ -772,9 +815,28 @@ const matrixRows = computed(() =>
   }
 }
 @media (max-width: 760px) {
+  .import-step .row .field,
+  .block .field {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    min-width: 0;
+    gap: 4px;
+  }
+  .import-step .row .field {
+    flex: 1 1 180px;
+  }
+  .import-step .row .input,
+  .block .field .input {
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+  }
   .stepper {
     flex-wrap: wrap;
     gap: 8px;
+  }
+  .stepper li {
+    flex-basis: calc(50% - 8px);
   }
   .stepper li::after {
     display: none;
