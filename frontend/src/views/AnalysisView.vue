@@ -16,11 +16,12 @@ type Tab = 'social' | 'org' | 'physical' | 'coupling'
 const ctx = useContextStore()
 const route = useRoute()
 const router = useRouter()
-const tab = computed<Tab>(() => (route.params.tab as Tab) || 'social')
+const tab = computed<Tab>(() => (route.params.tab as Tab) || 'physical')
+// 顺序按数据质量递减排列：物理 > 社会 > 组织 > 耦合（同时决定默认选中的首个维度）
 const tabs: Array<{ id: Tab; label: string; title: string }> = [
+  { id: 'physical', label: '物理', title: '交通影响分析' },
   { id: 'social', label: '社会', title: '社会影响分析' },
   { id: 'org', label: '组织', title: '组织发布分析' },
-  { id: 'physical', label: '物理', title: '交通影响分析' },
   { id: 'coupling', label: '耦合', title: '维度耦合分析' },
 ]
 const current = computed(() => tabs.find((t) => t.id === tab.value) || tabs[0])
@@ -105,7 +106,7 @@ const chart = computed<{ series: ChartSeries[]; summary: string; axis: string }>
       axis: '条',
       series: [
         { name: '官方发布（观测）', data: official.value, color: COLORS.accent, type: 'bar' },
-        { name: `${windowHours.value} 小时滚动基线`, data: officialBase.value, color: COLORS.muted, dashed: true },
+        { name: `${windowHours.value} 小时滚动基线`, data: officialBase.value, color: '#fde68a', dashed: true },
       ],
       summary: describeSeries('官方发布', official.value, '条') + '。缺测小时留空，不按零发布处理。',
     }
@@ -205,7 +206,7 @@ function onRowKey(e: KeyboardEvent, id: number) {
     </nav>
     <ContextGate>
       <div class="analysis-grid">
-        <section aria-label="指标曲线">
+        <section class="panel" aria-label="指标曲线">
           <StatusNote :status="series.status.value" :error="series.error.value" :stale="series.stale.value" @retry="series.reload" />
           <TrendChart
             :series="chart.series"
@@ -221,57 +222,66 @@ function onRowKey(e: KeyboardEvent, id: number) {
           />
         </section>
 
-        <aside class="basis" aria-labelledby="basis-title">
+        <aside class="panel basis" aria-labelledby="basis-title">
           <h2 id="basis-title">判定依据</h2>
           <template v-if="tab === 'social' || tab === 'org' || tab === 'physical'">
-            <dl>
-              <dt>观测值</dt>
-              <dd>
-                <span class="big num" :class="tab === 'physical' ? 'attn' : 'obs'">{{ fmtNum(at?.value, tab === 'social' ? 2 : 0) }}</span>
-                <span class="muted small">（{{ fmtTime(ctx.cursor) }}）</span>
-                <div v-if="!at" class="muted small">该小时缺测或尚未到达，不按 0 处理。</div>
-              </dd>
-              <template v-if="tab !== 'physical'">
+            <p class="basis-time muted small">{{ fmtTime(ctx.cursor) }}</p>
+            <dl class="basis-summary">
+              <div>
+                <dt>观测值</dt>
+                <dd class="big num" :class="tab === 'physical' ? 'attn' : 'obs'">{{ fmtNum(at?.value, tab === 'social' ? 2 : 0) }}</dd>
+              </div>
+              <div v-if="tab !== 'physical'">
                 <dt>基线</dt>
+                <dd class="mid num">{{ fmtNum(baseAt, tab === 'social' ? 2 : 1) }}</dd>
+              </div>
+              <div>
+                <dt>证据状态</dt>
                 <dd>
-                  <span class="mid num">{{ fmtNum(baseAt, tab === 'social' ? 2 : 1) }}</span>
-                  <div class="muted small">前 {{ windowHours }} 小时真实时间窗内有观测小时的均值</div>
+                  <span v-if="!at" class="tag">无观测</span>
+                  <span v-else-if="tab === 'social' && !sampleOk" class="tag attn">样本不足，不判定</span>
+                  <span v-else class="tag ok">可判定</span>
                 </dd>
-              </template>
-              <dt>样本量</dt>
-              <dd>
-                <span class="mid num">{{ at?.sample_size ?? '—' }}</span>
-                <div class="muted small">最小样本 {{ minSamples }}（来自规则配置）</div>
-              </dd>
-              <dt>证据状态</dt>
-              <dd>
-                <span v-if="!at" class="tag">无观测</span>
-                <span v-else-if="tab === 'social' && !sampleOk" class="tag attn">样本不足，不判定</span>
-                <span v-else class="tag ok">可判定</span>
-              </dd>
-              <template v-if="tab === 'social'">
-                <dt>阈值</dt>
-                <dd class="small">绝对下限 {{ negFloor }}；稳健 z ≥ {{ single.mad_z_threshold ?? 3 }} 或分位数 {{ single.quantile_threshold ?? 0.95 }}</dd>
-              </template>
-              <template v-if="tab === 'physical'">
-                <dt>映射状态</dt>
-                <dd class="small">
-                  已映射 {{ impactCounts.mapped }} · 待核验 {{ impactCounts.pending_review }} · 未映射 {{ impactCounts.unmapped }}
-                  <div class="muted">{{ impact.data.value?.recovery.message }}</div>
-                </dd>
-              </template>
+              </div>
             </dl>
+            <p v-if="!at" class="muted small">该小时缺测或尚未到达，不按 0 处理。</p>
+            <details class="basis-details">
+              <summary>样本与规则细节</summary>
+              <dl class="small">
+                <dt>样本量</dt>
+                <dd><strong class="num">{{ at?.sample_size ?? '—' }}</strong> · 最小样本 {{ minSamples }}（来自规则配置）</dd>
+                <template v-if="tab !== 'physical'">
+                  <dt>基线口径</dt>
+                  <dd>前 {{ windowHours }} 小时真实时间窗内有观测小时的均值</dd>
+                </template>
+                <template v-if="tab === 'social'">
+                  <dt>阈值</dt>
+                  <dd>绝对下限 {{ negFloor }}；稳健 z ≥ {{ single.mad_z_threshold ?? 3 }} 或分位数 {{ single.quantile_threshold ?? 0.95 }}</dd>
+                </template>
+                <template v-if="tab === 'physical'">
+                  <dt>映射状态</dt>
+                  <dd>
+                    已映射 {{ impactCounts.mapped }} · 待核验 {{ impactCounts.pending_review }} · 未映射 {{ impactCounts.unmapped }}
+                    <div class="muted">{{ impact.data.value?.recovery.message }}</div>
+                  </dd>
+                </template>
+              </dl>
+              <RouterLink :to="{ name: 'glossary', hash: '#rule-title' }">异常判定阈值 →</RouterLink>
+            </details>
           </template>
           <template v-else>
             <p class="small">两维关系只在两个维度都有覆盖的省份运行；三维联合要求三维均可用，按维度计数。组织缺测的省份不输出任何组织关系结论。</p>
             <p class="small muted">相关与同步只说明时序上的共同变化，不作因果或责任结论。</p>
           </template>
-          <RouterLink class="small" :to="{ name: 'evidence' }">查看原始证据 →</RouterLink>
+          <div class="basis-links small">
+            <RouterLink :to="{ name: 'evidence' }">查看原始证据 →</RouterLink>
+            <RouterLink :to="{ name: 'glossary', hash: '#metric-title' }">指标口径 →</RouterLink>
+          </div>
         </aside>
       </div>
 
       <div class="lower-grid">
-        <section v-if="tab === 'social'" aria-labelledby="topic-title">
+        <section v-if="tab === 'social'" class="panel" aria-labelledby="topic-title">
           <div class="section-head">
             <h2 id="topic-title">话题频次</h2>
             <span class="muted small">{{ topicsNow.data.value?.method }} · 样本 {{ topicsNow.data.value?.sample_size ?? 0 }} 条</span>
@@ -290,7 +300,7 @@ function onRowKey(e: KeyboardEvent, id: number) {
           </ul>
         </section>
 
-        <section v-else-if="tab === 'org'" aria-labelledby="cov-title">
+        <section v-else-if="tab === 'org'" class="panel" aria-labelledby="cov-title">
           <div class="section-head"><h2 id="cov-title">地区覆盖</h2></div>
           <StatusNote :status="coverage.status.value" :error="coverage.error.value" @retry="coverage.reload" />
           <div class="table-wrap">
@@ -317,7 +327,7 @@ function onRowKey(e: KeyboardEvent, id: number) {
           </div>
         </section>
 
-        <section v-else-if="tab === 'physical'" aria-labelledby="seg-title">
+        <section v-else-if="tab === 'physical'" class="panel" aria-labelledby="seg-title">
           <div class="section-head">
             <h2 id="seg-title">停运区段</h2>
             <RouterLink class="right small" to="/overview/impact">完整影响事件 ›</RouterLink>
@@ -345,7 +355,7 @@ function onRowKey(e: KeyboardEvent, id: number) {
           </div>
         </section>
 
-        <section v-else aria-labelledby="matrix-title">
+        <section v-else class="panel" aria-labelledby="matrix-title">
           <div class="section-head"><h2 id="matrix-title">关系任务状态</h2><span class="muted small">每个省份、每项任务独立判定</span></div>
           <StatusNote :status="coverage.status.value" :error="coverage.error.value" @retry="coverage.reload" />
           <div class="table-wrap">
@@ -366,7 +376,7 @@ function onRowKey(e: KeyboardEvent, id: number) {
           </div>
         </section>
 
-        <section aria-labelledby="obs-title">
+        <section class="panel" aria-labelledby="obs-title">
           <div class="section-head">
             <h2 id="obs-title">{{ tab === 'coupling' ? '关系与联合异常' : '异常观测' }}</h2>
             <span class="muted small">共 {{ anomalies.data.value?.total ?? 0 }} 条</span>
@@ -414,24 +424,41 @@ function onRowKey(e: KeyboardEvent, id: number) {
 .analysis-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 260px;
-  gap: 28px;
+  gap: 16px;
 }
-.basis {
-  border-left: 1px solid var(--line);
-  padding-left: 22px;
+.basis-time {
+  margin: 4px 0 8px;
 }
-.basis dl {
-  margin: 10px 0;
+.basis-summary {
+  display: grid;
+  margin: 0 0 10px;
+  gap: 8px;
+}
+.basis-summary > div {
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line);
 }
 .basis dt {
   color: var(--muted);
   font-size: 13px;
-  margin-top: 12px;
 }
 .basis dd {
-  margin: 2px 0 0;
-  padding-bottom: 10px;
-  border-bottom: 1px solid var(--line);
+  margin: 3px 0 0;
+}
+.basis-details {
+  font-size: 13px;
+}
+.basis-details summary {
+  cursor: pointer;
+}
+.basis-details dt {
+  margin-top: 8px;
+}
+.basis-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin-top: 12px;
 }
 .big {
   font-size: 30px;
@@ -450,8 +477,8 @@ function onRowKey(e: KeyboardEvent, id: number) {
 .lower-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 32px;
-  margin-top: 26px;
+  gap: 16px;
+  margin-top: 16px;
 }
 .legend {
   display: flex;
@@ -472,7 +499,7 @@ function onRowKey(e: KeyboardEvent, id: number) {
 }
 .sw.prev,
 .bar.prev {
-  background: #cfd8e3;
+  background: var(--faint);
 }
 .bars {
   list-style: none;
@@ -505,9 +532,11 @@ function onRowKey(e: KeyboardEvent, id: number) {
   .lower-grid {
     grid-template-columns: 1fr;
   }
-  .basis {
-    border-left: 0;
-    padding-left: 0;
+  .basis-summary {
+    grid-template-columns: repeat(auto-fit, minmax(84px, 1fr));
+  }
+  .big {
+    font-size: 24px;
   }
 }
 </style>

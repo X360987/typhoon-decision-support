@@ -4,6 +4,7 @@ import { api } from '../api/client'
 import type { ActionTask, Suggestion } from '../api/types'
 import ContextGate from '../components/ContextGate.vue'
 import PagerBar from '../components/PagerBar.vue'
+import SectionNav from '../components/SectionNav.vue'
 import StatusNote from '../components/StatusNote.vue'
 import { useLoader } from '../composables/useLoader'
 import { usePager } from '../composables/usePager'
@@ -11,6 +12,11 @@ import { REVIEW_NAMES, errorText, fmtTime, provinceName } from '../lib/format'
 import { useContextStore } from '../stores/context'
 
 const ctx = useContextStore()
+const sections = [
+  { id: 'sus-title', label: '停运范围' },
+  { id: 'run-title', label: '车次运行实例' },
+  { id: 'act-title', label: '行动任务' },
+]
 const opts = { scope: () => ctx.scopeKey, enabled: () => ctx.ready }
 
 const impact = useLoader((signal) => api.impact(ctx.params, signal), () => ctx.key, opts)
@@ -20,6 +26,7 @@ const suggestions = useLoader(
   opts,
 )
 const actions = useLoader((signal) => api.actions({ dataset_id: ctx.datasetId, event_id: ctx.eventId }, signal), () => ctx.key, opts)
+const sectionsPending = computed(() => [impact, suggestions, actions].some((loader) => loader.status.value === 'loading'))
 
 const MAPPING: Record<string, { text: string; cls: string }> = {
   mapped: { text: '已映射', cls: 'ok' },
@@ -112,9 +119,10 @@ function setStatus(t: ActionTask, status: ActionTask['status']) {
       <RouterLink to="/overview" class="small">‹ 返回事件总览</RouterLink>
     </div>
     <ContextGate>
-      <section aria-labelledby="sus-title">
+      <SectionNav label="影响事件与行动目录" :sections="sections" :pending="sectionsPending" />
+      <section class="panel" aria-labelledby="sus-title">
         <div class="section-head">
-          <h2 id="sus-title">停运范围</h2>
+          <h2 id="sus-title" tabindex="-1">停运范围</h2>
           <span class="muted small">
             已映射 {{ counts.mapped }} · 待核验 {{ counts.pending_review }} · 未映射 {{ counts.unmapped }}
             · 先按车次运行实例建立完整时间轴，再裁剪停运区段；端点无法匹配时进入待核验，不默认整线。
@@ -171,9 +179,9 @@ function setStatus(t: ActionTask, status: ActionTask['status']) {
         <PagerBar v-model="susPager.page.value" :pages="susPager.pages.value" :total="susPager.total.value" label="停运范围分页" />
       </section>
 
-      <section class="section" aria-labelledby="run-title">
+      <section class="section panel" aria-labelledby="run-title">
         <div class="section-head">
-          <h2 id="run-title">车次运行实例</h2>
+          <h2 id="run-title" tabindex="-1">车次运行实例</h2>
           <span class="muted small">去重键：车次 + 运行日期。跨省的同一运行实例只计一次。</span>
         </div>
         <div class="table-wrap">
@@ -205,9 +213,9 @@ function setStatus(t: ActionTask, status: ActionTask['status']) {
         <p class="note small">恢复与复运：{{ impact.data.value?.recovery.message || '未接入' }}</p>
       </section>
 
-      <section class="section" aria-labelledby="act-title">
+      <section class="section panel" aria-labelledby="act-title">
         <div class="section-head">
-          <h2 id="act-title">候选建议与行动任务</h2>
+          <h2 id="act-title" tabindex="-1">候选建议与行动任务</h2>
         </div>
         <p class="note">
           候选建议由规则生成，需人工核验通过后才能形成业务行动任务。行动任务记录责任人、期限、回执与销项，与后台计算任务（TaskRun）分开；计算成功不代表处置完成。平台不自动发布、调度或认定责任。

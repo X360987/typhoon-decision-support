@@ -20,6 +20,7 @@ export const useContextStore = defineStore('context', () => {
   const replayMode = ref<ReplayMode>('retrospective')
   const cursor = ref<string | null>(null)
   const dataVersion = ref('')
+  const dailyStats = ref(false)
   const bootStatus = ref<BootStatus>('idle')
   const bootError = ref('')
   /** Bumped after writes (import, rerun, seed) so pages reload even if the context is unchanged. */
@@ -35,10 +36,10 @@ export const useContextStore = defineStore('context', () => {
   const params = computed<Params>(() => ({
     dataset_id: datasetId.value,
     event_id: eventId.value,
-    province_code: province.value || undefined,
-    replay_mode: replayMode.value,
-    as_of: strict.value ? cursor.value : undefined,
-    data_version: dataVersion.value || undefined,
+    province_code: dailyStats.value ? undefined : province.value || undefined,
+    replay_mode: dailyStats.value ? 'retrospective' : replayMode.value,
+    as_of: !dailyStats.value && strict.value ? cursor.value : undefined,
+    data_version: dailyStats.value ? undefined : dataVersion.value || undefined,
   }))
 
   /** Changes whenever any part of the context changes; pages watch it to reload. */
@@ -78,6 +79,14 @@ export const useContextStore = defineStore('context', () => {
         eventId.value = null
         bootStatus.value = 'no_dataset'
         return
+      }
+      if (health.value.data_mode === 'real') {
+        const { items } = await api.registry()
+        dailyStats.value = ['weibo_count', 'suspension_count'].every((id) =>
+          items.some((metric) => metric.id === id && metric.aggregation === 'daily_count'),
+        )
+      } else {
+        dailyStats.value = false
       }
       if (!ds.items.some((d) => d.id === datasetId.value)) datasetId.value = ds.items[0].id
       await loadEvents()
@@ -132,6 +141,7 @@ export const useContextStore = defineStore('context', () => {
     replayMode,
     cursor,
     dataVersion,
+    dailyStats,
     bootStatus,
     bootError,
     revision,

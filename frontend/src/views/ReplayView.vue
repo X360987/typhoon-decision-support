@@ -99,7 +99,16 @@ const locatorCard = computed(() => locator.data.value?.cards?.physical_trains)
     </div>
     <ContextGate>
       <div class="replay-grid">
-        <section aria-label="三维泳道">
+        <section class="panel lanes" aria-label="三维泳道">
+          <TimeAxis
+            v-if="ctx.event"
+            :key="ctx.event.id"
+            class="replay-axis"
+            :start="ctx.event.start_time"
+            :end="ctx.event.end_time"
+            :model-value="ctx.cursor"
+            @update:model-value="ctx.setCursor"
+          />
           <StatusNote :status="lanes.status.value" :error="lanes.error.value" :stale="lanes.stale.value" @retry="lanes.reload" />
           <p v-if="lanes.data.value?.strict_unavailable" class="note attn small">
             {{ lanes.data.value.strict_unavailable }} 条指标到达时间未知，当时已知模式下不参与。
@@ -123,15 +132,54 @@ const locatorCard = computed(() => locator.data.value?.cards?.physical_trains)
             aria-label="社会、组织、物理三条泳道"
             @pick="ctx.setCursor"
           />
-          <TimeAxis
-            v-if="ctx.event"
-            :start="ctx.event.start_time"
-            :end="ctx.event.end_time"
-            :model-value="ctx.cursor"
-            @update:model-value="ctx.setCursor"
-          />
         </section>
-        <aside class="locator" aria-labelledby="loc-title">
+        <section class="panel records" aria-labelledby="log-title">
+          <div class="section-head">
+            <h2 id="log-title">事件记录（共 {{ logItems.length }} 条）</h2>
+            <span class="muted small">
+              游标前 {{ LOG_BEFORE }} 小时{{ ctx.strict ? '内已获知' : `至游标后 ${LOG_AFTER} 小时` }}的记录，按获知时间排序；“获知”指数据到达平台的时间。
+            </span>
+          </div>
+          <StatusNote
+            :status="log.status.value"
+            :error="log.error.value"
+            :stale="log.stale.value"
+            :empty="!logItems.length"
+            empty-text="该时间窗内没有可展示的事件记录。"
+            @retry="log.reload"
+          />
+          <div v-if="logItems.length" class="table-wrap log">
+            <table class="data">
+              <thead>
+                <tr>
+                  <th>发生时间</th>
+                  <th>获知时间</th>
+                  <th>类型</th>
+                  <th>简要描述</th>
+                  <th>地区</th>
+                  <th>证据</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="it in logItems" :key="it.ref + it.kind" :class="{ future: afterCursor(it) }">
+                  <td class="num">{{ fmtTime(it.time) }}</td>
+                  <td class="num">
+                    {{ fmtTime(it.known_at) }}
+                    <span v-if="afterCursor(it)" class="tag attn">游标后获知</span>
+                  </td>
+                  <td><span class="dot" :style="{ background: KIND[it.kind].color }"></span>{{ KIND[it.kind].label }}</td>
+                  <td>{{ it.label }}</td>
+                  <td>{{ it.province_code ? provinceName(it.province_code) : '—' }}</td>
+                  <td>
+                    <button v-if="it.kind === 'anomaly'" type="button" class="btn ghost" @click="openRef(it)">查看证据</button>
+                    <span v-else class="muted small">{{ it.ref }}</span>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+        <aside class="panel locator" aria-labelledby="loc-title">
           <h2 id="loc-title">影响定位</h2>
           <p class="muted small">{{ fmtTime(locatorCard?.hour_bj) }} 各省受影响车次</p>
           <ProvinceMap
@@ -146,53 +194,6 @@ const locatorCard = computed(() => locator.data.value?.cards?.physical_trains)
           <p class="muted small">点击省份可切换泳道省份；当前：{{ provinceName(ctx.province || 'ALL') }}</p>
         </aside>
       </div>
-
-      <section class="section" aria-labelledby="log-title">
-        <div class="section-head">
-          <h2 id="log-title">事件记录（共 {{ logItems.length }} 条）</h2>
-          <span class="muted small">
-            游标前 {{ LOG_BEFORE }} 小时{{ ctx.strict ? '内已获知' : `至游标后 ${LOG_AFTER} 小时` }}的记录，按获知时间排序；“获知”指数据到达平台的时间。
-          </span>
-        </div>
-        <StatusNote
-          :status="log.status.value"
-          :error="log.error.value"
-          :stale="log.stale.value"
-          :empty="!logItems.length"
-          empty-text="该时间窗内没有可展示的事件记录。"
-          @retry="log.reload"
-        />
-        <div v-if="logItems.length" class="table-wrap log">
-          <table class="data">
-            <thead>
-              <tr>
-                <th>发生时间</th>
-                <th>获知时间</th>
-                <th>类型</th>
-                <th>简要描述</th>
-                <th>地区</th>
-                <th>证据</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="it in logItems" :key="it.ref + it.kind" :class="{ future: afterCursor(it) }">
-                <td class="num">{{ fmtTime(it.time) }}</td>
-                <td class="num">
-                  {{ fmtTime(it.known_at) }}
-                  <span v-if="afterCursor(it)" class="tag attn">游标后获知</span>
-                </td>
-                <td><span class="dot" :style="{ background: KIND[it.kind].color }"></span>{{ KIND[it.kind].label }}</td>
-                <td>{{ it.label }}</td>
-                <td>{{ it.province_code ? provinceName(it.province_code) : '—' }}</td>
-                <td>
-                  <button v-if="it.kind === 'anomaly'" type="button" class="btn ghost" @click="openRef(it)">查看证据</button>
-                  <span v-else class="muted small">{{ it.ref }}</span>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </section>
     </ContextGate>
   </div>
 </template>
@@ -204,11 +205,15 @@ const locatorCard = computed(() => locator.data.value?.cards?.physical_trains)
 .replay-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 300px;
-  gap: 24px;
+  grid-template-areas: 'lanes locator' 'records records';
+  align-items: start;
+  gap: 16px;
 }
-.locator {
-  border-left: 1px solid var(--line);
-  padding-left: 20px;
+.lanes { grid-area: lanes; }
+.locator { grid-area: locator; }
+.records { grid-area: records; }
+.replay-axis {
+  margin: 0 0 12px;
 }
 .log {
   max-height: 420px;
@@ -227,10 +232,7 @@ tr.future td {
 @media (max-width: 1100px) {
   .replay-grid {
     grid-template-columns: 1fr;
-  }
-  .locator {
-    border-left: 0;
-    padding-left: 0;
+    grid-template-areas: 'lanes' 'records' 'locator';
   }
 }
 </style>

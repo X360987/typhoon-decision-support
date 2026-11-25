@@ -39,6 +39,7 @@ const props = withDefaults(
     xMin?: string
     xMax?: string
     height?: number
+    daily?: boolean
     summary: string
     ariaLabel?: string
   }>(),
@@ -70,6 +71,14 @@ function fmtTip(ms: number) {
 }
 
 function build() {
+  const theme = getComputedStyle(document.documentElement)
+  const muted = theme.getPropertyValue('--muted').trim()
+  const text = theme.getPropertyValue('--text').trim()
+  const secondary = theme.getPropertyValue('--text-secondary').trim()
+  const line = theme.getPropertyValue('--line').trim()
+  const strongLine = theme.getPropertyValue('--line-strong').trim()
+  const accent = theme.getPropertyValue('--accent').trim()
+  const cursorLine = theme.getPropertyValue('--line-active').trim()
   const lanes = Math.max(1, props.lanes)
   const top = 54
   const bottom = 30
@@ -89,22 +98,28 @@ function build() {
     gridIndex: i,
     min: xMin,
     max: xMax,
-    axisLabel: { show: i === lanes - 1, color: '#64748B', formatter: fmtAxis, hideOverlap: true },
-    axisLine: { lineStyle: { color: '#D4DBE5' } },
-    axisTick: { show: i === lanes - 1 },
+    minInterval: props.daily ? 86_400_000 : undefined,
+    axisLabel: {
+      show: i === lanes - 1,
+      color: muted,
+      formatter: props.daily ? (ms: number) => new Date(ms).toISOString().slice(5, 10) : fmtAxis,
+      hideOverlap: true,
+    },
+    axisLine: { lineStyle: { color: strongLine } },
+    axisTick: { show: i === lanes - 1, lineStyle: { color: strongLine } },
     splitLine: { show: false },
   }))
   const yAxis = props.axes.map((a) => ({
     type: 'value' as const,
     gridIndex: a.lane ?? 0,
     name: a.name,
-    nameTextStyle: { color: '#64748B', fontSize: 11, align: a.right ? ('right' as const) : ('left' as const) },
+    nameTextStyle: { color: muted, fontSize: 11, align: a.right ? ('right' as const) : ('left' as const) },
     position: a.right ? ('right' as const) : ('left' as const),
     min: a.min,
     max: a.max,
     splitNumber: lanes > 1 ? 2 : 4,
-    axisLabel: { color: '#64748B', fontSize: 11 },
-    splitLine: { show: !a.right, lineStyle: { color: '#EEF1F5' } },
+    axisLabel: { color: muted, fontSize: 11 },
+    splitLine: { show: !a.right, lineStyle: { color: line, type: 'dashed' as const } },
   }))
   const series: Array<Record<string, unknown>> = props.series.map((s) => {
     const axisIdx = s.axis ?? 0
@@ -117,7 +132,14 @@ function build() {
       data,
       itemStyle: { color: s.color },
     }
-    if (s.type === 'bar') return { ...common, type: 'bar', stack: s.stack, barMaxWidth: 10, itemStyle: { color: s.color, opacity: 0.85 } }
+    if (s.type === 'bar')
+      return {
+        ...common,
+        type: 'bar',
+        stack: s.stack,
+        barMaxWidth: 10,
+        itemStyle: { color: s.color, opacity: 0.78, borderRadius: [3, 3, 0, 0] },
+      }
     if (s.type === 'scatter') return { ...common, type: 'scatter', symbolSize: 9 }
     return {
       ...common,
@@ -126,11 +148,26 @@ function build() {
       showSymbol: s.symbol ?? false,
       symbolSize: 5,
       lineStyle: { color: s.color, width: 2, type: s.dashed ? 'dashed' : 'solid' },
-      areaStyle: s.area ? { color: s.color, opacity: 0.08 } : undefined,
+      areaStyle: s.area
+        ? {
+            color: {
+              type: 'linear',
+              x: 0,
+              y: 0,
+              x2: 0,
+              y2: 1,
+              colorStops: [
+                { offset: 0, color: s.color || accent },
+                { offset: 1, color: 'rgba(6, 8, 12, 0)' },
+              ],
+            },
+            opacity: 0.22,
+          }
+        : undefined,
     }
   })
   const marks = [
-    ...(props.cursor ? [{ time: props.cursor, label: props.cursorLabel, color: '#2563EB' }] : []),
+    ...(props.cursor ? [{ time: props.cursor, label: props.cursorLabel, color: cursorLine }] : []),
     ...props.markers,
   ]
   for (let lane = 0; lane < lanes; lane++) {
@@ -146,8 +183,8 @@ function build() {
         animation: false,
         data: marks.map((m) => ({
           xAxis: toMs(m.time),
-          lineStyle: { color: m.color || '#2563EB', type: 'solid', width: 1.2 },
-          label: { show: lane === 0 && !!m.label, formatter: m.label, color: m.color || '#2563EB', position: 'end' as const },
+          lineStyle: { color: m.color || accent, type: 'solid', width: 1.2 },
+          label: { show: lane === 0 && !!m.label, formatter: m.label, color: m.color || accent, position: 'end' as const },
         })),
       },
     })
@@ -159,16 +196,27 @@ function build() {
     yAxis,
     series,
     legend: {
+      type: 'scroll',
       top: 0,
       left: 0,
       itemWidth: 16,
       itemHeight: 8,
-      textStyle: { color: '#475569', fontSize: 12 },
+      textStyle: { color: secondary, fontSize: 12 },
+      pageTextStyle: { color: muted },
+      pageIconColor: accent,
+      pageIconInactiveColor: strongLine,
       data: props.series.map((s) => s.name),
     },
     tooltip: {
       trigger: 'axis',
-      axisPointer: { type: 'line', lineStyle: { color: '#94A3B8' } },
+      confine: true,
+      backgroundColor: 'rgba(14, 18, 26, 0.92)',
+      borderColor: strongLine,
+      borderWidth: 1,
+      padding: [8, 12],
+      extraCssText: 'backdrop-filter: blur(12px); border-radius: 8px; box-shadow: 0 12px 28px rgba(0, 0, 0, 0.55);',
+      textStyle: { color: text, fontSize: 12 },
+      axisPointer: { type: 'line', lineStyle: { color: strongLine, type: 'dashed' } },
       formatter: (items: unknown) => {
         const list = (Array.isArray(items) ? items : [items]) as Array<{
           seriesName: string
@@ -177,7 +225,7 @@ function build() {
         }>
         const shown = list.filter((i) => !i.seriesName.startsWith('__'))
         if (!shown.length) return ''
-        const head = fmtTip(shown[0].value[0])
+        const head = props.daily ? new Date(shown[0].value[0]).toISOString().slice(0, 10) : fmtTip(shown[0].value[0])
         return [head, ...shown.map((i) => `${i.marker}${i.seriesName}：${i.value[1] ?? '缺测'}`)].join('<br/>')
       },
     },
@@ -189,7 +237,7 @@ function render() {
   if (!chart) {
     chart = echarts.init(el.value)
     chart.getZr().on('click', (evt) => {
-      if (!chart) return
+      if (!chart || props.daily) return
       const point = [evt.offsetX, evt.offsetY]
       for (let lane = 0; lane < props.lanes; lane++) {
         if (chart.containPixel({ gridIndex: lane }, point)) {
@@ -212,7 +260,7 @@ onMounted(() => {
 })
 
 watch(
-  () => [props.series, props.cursor, props.markers, props.xMin, props.xMax, props.lanes, props.axes, props.height],
+  () => [props.series, props.cursor, props.markers, props.xMin, props.xMax, props.lanes, props.axes, props.height, props.daily],
   render,
   { deep: true },
 )

@@ -30,51 +30,64 @@ const emit = defineEmits<{ (e: 'open', id: number): void }>()
 <style scoped>
 .feed {
   list-style: none;
+  display: grid;
+  gap: 8px;
   margin: 0;
   padding: 0;
-}
-.feed li {
-  border-bottom: 1px solid var(--line);
 }
 .item {
   position: relative;
   display: grid;
-  gap: 2px;
+  gap: 3px;
   width: 100%;
-  padding: 12px 4px 12px 22px;
-  border: 0;
-  background: none;
+  padding: 10px 12px 10px 24px;
+  border: 1px solid var(--line);
+  border-radius: calc(var(--panel-radius) - 3px);
+  background: color-mix(in oklab, var(--surface-tint) 50%, var(--surface));
   text-align: left;
   cursor: pointer;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
 }
 .item:hover .title {
-  color: var(--accent);
+  color: var(--accent-hover);
+}
+.item:hover {
+  border-color: var(--line-strong);
+  background: var(--surface-tint);
 }
 .dot {
   position: absolute;
-  left: 4px;
-  top: 18px;
-  width: 8px;
-  height: 8px;
+  left: 10px;
+  top: 15px;
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
   background: var(--accent);
+  box-shadow: 0 0 8px color-mix(in oklab, var(--accent) 55%, transparent);
 }
 .dot.pair {
   background: var(--attn);
+  box-shadow: 0 0 8px color-mix(in oklab, var(--attn) 55%, transparent);
 }
 .dot.joint {
   background: var(--danger);
+  box-shadow: 0 0 8px color-mix(in oklab, var(--danger) 55%, transparent);
 }
 .time {
-  color: var(--muted);
-  font-size: 12px;
+  color: var(--faint);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
 }
 .title {
+  color: var(--text);
+  font-size: 13.5px;
   font-weight: 600;
+  transition: color 0.15s ease;
 }
 .desc {
-  color: #475569;
-  font-size: 13px;
+  color: var(--muted);
+  font-size: 12.5px;
+  line-height: 1.48;
   display: -webkit-box;
   -webkit-line-clamp: 2;
   line-clamp: 2;
@@ -83,6 +96,6 @@ const emit = defineEmits<{ (e: 'open', id: number): void }>()
 }
 .meta {
   color: var(--faint);
-  font-size: 12px;
+  font-size: 11.5px;
 }
 </style>

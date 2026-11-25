@@ -37,10 +37,10 @@ export function describeSeries(name: string, data: SeriesData, unit = ''): strin
 }
 
 export const COLORS = {
-  obs: '#0F9CA8',
-  accent: '#2563EB',
-  attn: '#E98A24',
+  obs: '#2DD4BF',
+  accent: '#38BDF8',
+  attn: '#FBBF24',
   muted: '#94A3B8',
-  danger: '#D14343',
-  violet: '#7C3AED',
+  danger: '#FB7185',
+  violet: '#C084FC',
 }

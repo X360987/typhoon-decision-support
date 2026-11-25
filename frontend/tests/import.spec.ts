@@ -70,13 +70,14 @@ const clickText = async (w: VueWrapper, text: string) => {
   await settle()
 }
 
-async function toPrecheck() {
+async function toPrecheck(source = 'weibo', file = new File([CSV], 'bad.csv', { type: 'text/csv' })) {
   const env = setup('/data')
   await env.router.isReady()
   const wrapper = mount(DataView, { global: { plugins: [env.pinia, env.router] } })
   await settle()
+  await wrapper.get('.import-step select').setValue(source)
   const input = wrapper.find('input[type="file"]')
-  Object.defineProperty(input.element, 'files', { value: [new File([CSV], 'bad.csv', { type: 'text/csv' })] })
+  Object.defineProperty(input.element, 'files', { value: [file] })
   await input.trigger('change')
   await settle()
   await clickText(wrapper, '下一步')
@@ -133,6 +134,38 @@ describe('DataView import', () => {
     expect(result).toContain('分析状态')
     expect(ctx.revision).toBe(revision + 1)
     expect(mocked.events).toHaveBeenCalledWith('demo')
+  })
+
+  it('blocks strict submission when the backend created a ticket but found blocking errors', async () => {
+    mockApis()
+    mocked.precheck.mockResolvedValue(report({ ok: true, allowed_policies: ['strict', 'skip_errors'] }))
+    const { wrapper } = await toPrecheck()
+    await clickText(wrapper, '运行预检')
+    expect(commitButton(wrapper).attributes('disabled')).toBeDefined()
+    expect(wrapper.get('.import-step [role="status"]').text()).toContain('严格模式不能导入')
+    await commitButton(wrapper).trigger('click')
+    expect(mocked.commit).not.toHaveBeenCalled()
+  })
+
+  it('shows railway rows without Weibo fields and reports an unintegrated algorithm after import', async () => {
+    mockApis()
+    mocked.importSources.mockResolvedValue({
+      max_upload_mb: 20,
+      items: [{ entity: 'rail_manual', name: '人工停运工作簿', status: 'supported' }],
+    })
+    mocked.precheck.mockResolvedValue(report({
+      ok: true, entity: 'rail_manual', rows: 1, error_rows: [], blocking_errors: 0, checks: [], allowed_policies: ['strict'],
+      preview: [{ row: 2, published_at: null, publish_location: null, content: 'G123', status: 'ok' }],
+    }))
+    mocked.commit.mockResolvedValue({ ok: true, import_status: 'imported', analysis_status: 'not_integrated', batch_id: 9, inserted: 1, skipped: 0 })
+    const { wrapper } = await toPrecheck('rail_manual', new File(['sample'], 'rail.xlsx'))
+    expect(wrapper.get('.import-step thead').text()).toContain('车次')
+    expect(wrapper.get('.import-step table').text()).not.toContain('发布时间')
+    expect(wrapper.get('.import-step tbody').text()).toContain('G123')
+    await commitButton(wrapper).trigger('click')
+    await settle()
+    expect(wrapper.get('.result').text()).toContain('算法尚未接入')
+    expect(wrapper.get('.result').text()).not.toContain('分析失败')
   })
 
   it('a clean file can be committed under the strict policy', async () => {

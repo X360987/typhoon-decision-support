@@ -419,8 +419,12 @@ export interface BatchItem {
   status: string
   file_name: string | null
   created_at: string | null
-  completed_at: string | null
-  inserted: number | null
-  excluded_rows: number
-  analysis_status: string | null
+  completed_at?: string | null
+  inserted?: number | null
+  excluded_rows?: number
+  analysis_status?: string | null
+  report?: {
+    inserted: number
+    error_count: number
+  }
 }
